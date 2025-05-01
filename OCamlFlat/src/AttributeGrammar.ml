@@ -36,7 +36,7 @@
 		open AttributeGrammarSupport
 	
 		let howMany (w: word) (v: variable) =
-			List.lenght (List.filter (fun x-> x = v) w)
+			List.length (List.filter (fun x-> x = v) w)
 
 		let ag2cfg (rep: t): ContextFreeGrammarBasic.t =
 			ContextFreeGrammarBasic.cfg_zero
@@ -49,51 +49,51 @@
 				counter >= i 
 
 
-(* adicionar a regra *)
+
 		let rec validateExp (ag: t) (r: rule) (e: expression) : string =
-			
-			let attr_exists attr =
-				(* usar o belongs em vez de listas*)
-				Set.subset attr (Set.union ag.synthesized ag.inherited)
-				
-			in
-			let vars_exists vars =
-				Set.subset vars ag.variables
-			in
+					  let attr_exists attr =
+					    let single_attr_set = Set.add attr Set.empty in
+					    Set.subset single_attr_set (Set.union ag.synthesized ag.inherited)
+					  in
 
-			match e with
-			| Int _ -> "int"
-			| String _ -> "string"
-			| Bool _ -> "bool"
-			| Apply (attr, (var, i)) ->
-					if attr_exists attr then
-						if vars_exists var then 
-						if validateAttrArg ag r (var,i) then "int"
-						else "erro: variável não encontrada" (* mudar para mecanismo de erros*)
-					else  "erro: atributo não encontrado"
+					  let vars_exists vars =
+					    let vars_set = Set.add vars Set.empty in
+					    Set.subset vars_set ag.variables
+					  in
 
-			| Expr (op, l, r) ->
-					let tl = validateExp ag l in
-					let tr = validateExp ag r in
-					if tl = tr then
-						match op with
-						| "+" | "*" ->
-								if tl <> "string" then tl
-								else "erro: incompatibilidade de tipos"
-						| "<" | ">" | "<=" | ">=" | "=" | "<>" ->
-								if tl = "int" then "bool"
-								else "erro: incompatibilidade de tipos"
-						| _ -> "erro: operador desconhecido"
-					else "erro: incompatibilidade de tipos"
+					  match e with
+					  | Int _ -> "int"
+					  | String _ -> "string"
+					  | Bool _ -> "bool"
+					  | Apply (attr, (var, i)) ->
+					      if attr_exists attr then
+					        if vars_exists var then
+					          if validateAttrArg ag r (var, i) then "int"
+					          else "erro: Variável não encontrada"
+					        else "erro: Variável não encontrada"
+					      else "erro: Atributo não encontrado"
+					  | Expr (op, l, r_expr) ->
+					      let tl = validateExp ag r l in  (* Pass `r` explicitly *)
+					      let tr = validateExp ag r r_expr in  (* Pass `r` explicitly *)
+					      if tl = tr then
+					        match op with
+					        | "+" | "*" ->
+					            if tl <> "string" then tl
+					            else "erro: Incompatibilidade de tipos"
+					        | "<" | ">" | "<=" | ">=" | "=" | "<>" ->
+					            if tl = "int" then "bool"
+					            else "erro: Incompatibilidade de tipos"
+					        | _ -> "erro: Operador desconhecido"
+					      else "erro: Incompatibilidade de tipos"
 		
-		let validateEquation (ag: t) ((lhs, rhs): equation): string =
-			match lhs with
-			| Apply _ ->
-					let lhs_type = validateExp ag lhs in
-					let rhs_type = validateExp ag rhs in
-					if lhs_type = "int" && rhs_type = "int" then "valid"
-					else "erro: incompatibilidade de tipos na equação"
-			| _ -> "erro: lado esquerdo da equação deve ser Apply"
+		let validateEquation (ag: t) ((lhs, rhs): equation) (r: rule): string =
+		    match lhs with
+		    | Apply _ ->
+		        let lhs_type = validateExp ag r lhs in
+		        let rhs_type = validateExp ag r rhs in
+		        if lhs_type = "int" && rhs_type = "int" then "valid"
+		        else "erro: incompatibilidade de tipos na equação"
+		    | _ -> "erro: lado esquerdo da equação deve ser Apply"
 				
 					
 		let validate (name: string) (rep: AttributeGrammarSupport.t): unit = ()
