@@ -30,23 +30,23 @@
 
 	open BasicTypes
 	open Set  (* Ensure the Set module is opened *)
-	
+
 	module AttributeGrammarPrivate =
 	struct
 		open AttributeGrammarSupport
-	
+
 		let howMany (w: word) (v: variable) =
 			List.length (List.filter (fun x-> x = v) w)
 
 		let ag2cfg (rep: t): ContextFreeGrammarBasic.t =
 			ContextFreeGrammarBasic.cfg_zero
-		
+
 		let validateAttrArg (ag:t) (r:rule) (v,i) =
-			if i = 0 then 
+			if i = 0 then
 				r.head = v && Set.belongs v ag.inherited
-		else 
-			let counter = howMany r.body v in 
-				counter >= i 
+		else
+			let counter = howMany r.body v in
+				counter >= i
 
 
 
@@ -85,7 +85,7 @@
 					            else "erro: Incompatibilidade de tipos"
 					        | _ -> "erro: Operador desconhecido"
 					      else "erro: Incompatibilidade de tipos"
-		
+
 		let validateEquation (ag: t) ((lhs, rhs): equation) (r: rule): string =
 		    match lhs with
 		    | Apply _ ->
@@ -94,51 +94,93 @@
 		        if lhs_type = "int" && rhs_type = "int" then "valid"
 		        else "erro: incompatibilidade de tipos na equação"
 		    | _ -> "erro: lado esquerdo da equação deve ser Apply"
-				
-					
+
+
 		let validate (name: string) (rep: AttributeGrammarSupport.t): unit = ()
-			
+
 
 		let accept (rep: t) (w: word): bool =
 			false
-	
+
+
+
+		 let string_to_symbol (s: string): BasicTypes.symbol =
+		   (* Assuming BasicTypes.symbol is a type alias for string *)
+		   BasicTypes.str2symb s
+
+		  (* Updated ga_to_cfg function *)
+        let ga_to_cfg (ag: t): ContextFreeGrammarBasic.t =
+          let rules =
+            let rules_set = ref Set.empty in
+            Set.iter (fun r ->
+              let head_sym = r.head in
+              let body_syms = r.body in
+              let rule = { ContextFreeGrammarBasic.head = head_sym; body = body_syms } in
+              rules_set := Set.add rule !rules_set
+            ) ag.rules;
+            !rules_set
+          in
+          {
+            alphabet = ag.alphabet;
+            variables = ag.variables;
+            initial = ag.initial;
+            rules;
+          }
+
+        let cfg_to_ga (cfg: ContextFreeGrammarBasic.t): t =
+          {
+            alphabet = cfg.alphabet;
+            variables = cfg.variables;
+            synthesized = Set.empty; (* Default value for synthesized attributes *)
+            inherited = Set.empty;   (* Default value for inherited attributes *)
+            initial = cfg.initial;
+            rules = (Set.map (fun (r: ContextFreeGrammarBasic.rule) ->
+              {
+                head = r.head;
+                body = r.body;
+                equations = Set.empty; (* Default value for equations *)
+                conditions = Set.empty; (* Default value for conditions *)
+              }
+            ) cfg.rules : AttributeGrammarSupport.rules); (* Correct placement of type annotation *)
+          }
+
 	end
-	
+
 	module AttributeGrammar =
 	struct
 		include AttributeGrammarSupport
 		open AttributeGrammarPrivate
-	
+
 		(* Make *)
 		let make2 (arg: t Arg.alternatives): Entity.t * t = make2 arg validate
 		let make (arg: t Arg.alternatives): t = make arg validate
-	
+
 		(* Exercices support *)
 		let checkProperty (fa: t) (prop: string) =
 			match prop with
 				| _ -> Model.checkProperty prop
-		let checkExercise ex fa = Model.checkExercise ex (accept fa) (checkProperty fa)	
+		let checkExercise ex fa = Model.checkExercise ex (accept fa) (checkProperty fa)
 		let checkExerciseFailures ex fa = Model.checkExerciseFailures ex (accept fa) (checkProperty fa)
-	
+
 		(* Ops *)
 		let stats = Model.stats
 		let accept = accept
 	end
-	
+
 	module AttributeGrammarTop =
 	struct
 		open AttributeGrammar
 	end
-	
+
 	open AttributeGrammarTop
-	
+
 	module AttributeGrammarSupportTests : sig end =
 	struct
 		open AttributeGrammar
 		open AttributeGrammarPrivate
-		
+
 		let active = true
-		
+
 		let ag = {| {
 					kind : "attribute grammar",
 					description : "",
@@ -166,14 +208,32 @@
 			let h = toJSon g in
 			validate "ag" g;
 			JSon.show h
-					
 
-		let runAll =
-			if Util.testing active "AttributeGrammarSupport" then begin
-				Util.header "test0";
-				test0 ();
-				Util.header "test1";
-				test1 ();
-			end
+
+        let test_ga_to_cfg () =
+            let ag = make (Arg.Text ag) in
+            let cfg = ga_to_cfg ag in
+            let converted_ag = cfg_to_ga cfg in
+            let h = toJSon converted_ag in
+                JSon.show h
+
+        let test_cfg_to_ga () =
+          let ag = make (Arg.Text ag) in
+          let cfg = ga_to_cfg ag in
+          let converted_ag = cfg_to_ga cfg in
+          (* Add assertions to verify the converted AG *)
+          JSon.show (toJSon converted_ag)
+
+        let runAll =
+          if Util.testing active "AttributeGrammarSupport" then begin
+            Util.header "test0";
+            test0 ();
+            Util.header "test1";
+            test1 ();
+            Util.header "test_ga_to_cfg";
+            test_ga_to_cfg ();
+            Util.header "test_cfg_to_ga";
+            test_cfg_to_ga ();
+          end
 	end
 
