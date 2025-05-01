@@ -1,0 +1,174 @@
+(*
+ * GrammarUnrestricted.ml
+ *
+ * This file is part of the OCamlFLAT library
+ *
+ * LEAFS project (partially supported by the OCaml Software Foundation) [2020/21]
+ * FACTOR project (partially supported by the Tezos Foundation) [2019/20]
+ *
+ * NOVA LINCS - NOVA Laboratory for Computer Science and Informatics
+ * Dept. de Informatica, FCT, Universidade Nova de Lisboa.
+ *
+ * This software is distributed under the terms of the GPLv3 license.
+ * See the included LICENSE file for details.
+ *
+ *  Written by Pedro Carlos (p.carlos)
+ *)
+
+(*
+ * ChangeLog:
+ *
+ * jul/2024 (amd) - New file.
+ *)
+
+(*
+ * Description: General grammar functionality.
+ *)
+
+(*
+Árvores de derivação
+Exercícios
+Composição
+
+forma simplificada de criar modelos
+*)
+
+open BasicTypes
+
+module GrammarAccept =
+struct
+	open GrammarSupport
+
+	let initialConfig (gram: t) (w: word) : configurations =
+		Set.empty (* TODO *)
+
+	let rec expand (gram: t) (sf,w) : configurations =
+		Set.empty (* TODO *)
+
+	let rec expandGenerate (gram: t) (len: int) (sf,w) : configurations =
+		Set.empty (* TODO *)
+
+	let nextConfigs (gram: t) (sf, w) : configurations =
+		Set.empty (* TODO *)
+
+	let isAcceptingConfig (gram: t) (rl, w) : bool =
+		false (* TODO *)
+
+	let accept (gram: t) (w: word) : bool =
+		false (* TODO *)
+		
+	let acceptFull (gram: t) (w: word) : bool * path * trail =
+		(false, [], []) (* TODO *)
+end
+
+module GrammarGenerate = 
+struct
+	open GrammarSupport
+	open GrammarAccept
+
+	let nextConfigs2 (gram: t) (len: int) (sf, w) : configurations =
+		Set.empty (* TODO *)
+
+	let isAcceptingConfig2 (gram: t) (sf, w) : bool =
+		false (* TODO *)
+
+	let getWord (sf, _) =
+		"" (* TODO *)
+
+	let generate (gram: t) (len: int) : words =	
+		Set.empty (* TODO *)
+end
+
+module GrammarPrivate =
+struct
+	open GrammarSupport
+
+	let validate (name: string) (rep: t): unit =
+		() (* TODO *)
+	
+	let clean (gram: t): t =
+		gram (* TODO *)
+
+	let isUnrestrictedGrammar (gram: t): bool =
+		true
+	
+	let isMonotonicGrammar (gram: t): bool =
+		false
+
+	let isNoncontractingGrammar = isMonotonicGrammar
+
+	let isContextSensitiveGrammar (gram: t): bool =
+		false
+
+	let isContextFreeGrammar (gram: t): bool =
+		false
+
+	let isLeftLinearGrammar (gram: t): bool =
+		false
+
+	let isRightLinearGrammar (gram: t): bool =
+		false
+
+	let isLinearGrammar (gram: t): bool =
+		false
+end
+
+module Grammar =
+struct
+	include GrammarSupport
+	open GrammarPrivate
+
+	(* Make *)
+	let make2 (arg: t Arg.alternatives): Entity.t * t = make2 arg validate
+	let make (arg: t Arg.alternatives): t = make arg validate
+
+	(* Ops *)
+	let accept = GrammarAccept.accept
+	let generate = GrammarGenerate.generate	
+	let clean = clean	
+
+	(* Exercices support *)
+	let checkProperty (gram: t) (prop: string) =
+		match prop with
+		| "general grammar" -> true
+		| _ -> Model.checkProperty prop
+	let checkExercise ex gram = Model.checkExercise ex (accept gram) (checkProperty gram)	
+	let checkExerciseFailures ex gram = Model.checkExerciseFailures ex (accept gram) (checkProperty gram)
+
+
+
+(* IGNORE
+
+	class model (arg: t Arg.alternatives) =
+		object(self) inherit Model.model arg kind as super
+			val representation = Entity.create arg fromJSon
+			(* placement of the initializer is crucial - after representation *)
+			initializer Entity.endCreation self#id self#representation kind validate
+
+			val mutable simplified = false
+		(* Representation *)
+			method representation = representation
+		(* Kind *)
+
+		(* Show *)			
+			method toJSon: JSon.t = toJSon representation
+			method toJSon2: JSon.t = toJSon2 self#id representation
+			method show: unit = show representation
+			method show2: unit = show2 self#id representation
+
+			method accept (testWord:word) : bool = false
+			method acceptFull (w: word) : bool * path * trail = acceptFull representation w
+			method generate (length:int) : words = Set.empty
+
+		(* Exercices support *)
+			method checkProperty (prop: string) = checkProperty representation prop
+
+		(* Learn-OCaml support *)
+			method moduleName = moduleName
+			method xTypeName = xTypeName
+			method xTypeDeclString : string = prelude
+			method toDisplayString (name: string): string = solution name self#representation
+			method example : JSon.t = example
+		end
+*)
+end

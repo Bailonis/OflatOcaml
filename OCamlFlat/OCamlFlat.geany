@@ -1,0 +1,56 @@
+[file_prefs]
+final_new_line=true
+ensure_convert_new_lines=true
+strip_trailing_spaces=false
+replace_tabs=false
+
+[indentation]
+indent_width=4
+indent_type=1
+indent_hard_tab_width=8
+detect_indent=false
+detect_indent_width=false
+indent_mode=2
+
+[project]
+name=OCamlFlat
+description=
+file_patterns=
+base_path=
+
+[long line marker]
+long_line_behaviour=1
+long_line_column=80
+
+[files]
+current_page=7
+FILE_NAME_0=3132;CAML;0;EUTF-8;1;1;1;%2Fhome%2Famd%2Fdevelopment%2FOCamlFlat-development%2FOCamlFlat%2Fsrc%2FGrammarSupport.ml;0;4
+FILE_NAME_1=1017;CAML;0;EUTF-8;1;1;1;%2Fhome%2Famd%2Fdevelopment%2FOCamlFlat-development%2FOCamlFlat%2Fsrc%2FScanner.ml;0;4
+FILE_NAME_2=0;CAML;0;EUTF-8;1;1;1;%2Fhome%2Famd%2Fdevelopment%2FOCamlFlat-development%2FOCamlFlat%2Fsrc%2FContextFreeGrammar.ml;0;4
+FILE_NAME_3=0;CAML;0;EUTF-8;1;1;1;%2Fhome%2Famd%2Fdevelopment%2FOCamlFlat-development%2FOCamlFlat%2Fsrc%2FFiniteAutomatonSupport.ml;0;4
+FILE_NAME_4=0;CAML;0;EUTF-8;1;1;1;%2Fhome%2Famd%2Fdevelopment%2FOCamlFlat-development%2FOCamlFlat%2Fsrc%2FFiniteAutomaton.ml;0;4
+FILE_NAME_5=3142;CAML;0;EUTF-8;1;1;1;%2Fhome%2Famd%2Fdevelopment%2FOCamlFlat-development%2FOCamlFlat%2Fsrc%2FFiniteAutomatonTests.ml;0;4
+FILE_NAME_6=937;CAML;0;EUTF-8;1;1;1;%2Fhome%2Famd%2Fdevelopment%2FOCamlFlat-development%2FOCamlFlat%2Fsrc%2FAttributeGrammar.ml;0;4
+FILE_NAME_7=6059;CAML;0;EUTF-8;1;1;1;%2Fhome%2Famd%2Fdevelopment%2FOCamlFlat-development%2FOCamlFlat%2Fsrc%2FContextFreeGrammarBasic.ml;0;4
+
+[VTE]
+last_dir=/home/amd
+
+[build-menu]
+EX_00_LB=_Execute
+EX_00_CM=cd .. ; make run
+EX_00_WD=
+NF_00_LB=_Make
+NF_00_CM=cd .. ; make
+NF_00_WD=
+NF_02_LB=Test
+NF_02_CM=cd ..; make test
+NF_02_WD=
+NF_03_LB=Clean
+NF_03_CM=cd ..; make clean
+NF_03_WD=
+
+[editor]
+line_wrapping=true
+line_break_column=80
+auto_continue_multiline=true
