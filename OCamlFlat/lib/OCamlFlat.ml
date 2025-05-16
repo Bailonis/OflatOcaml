@@ -12706,99 +12706,149 @@ end
  *)
 
 	open BasicTypes
-	open Set  (* Ensure the Set module is opened *)
-	
+	open Set
+
 	module AttributeGrammarPrivate =
 	struct
 		open AttributeGrammarSupport
-	
+
+		let howMany (body: word) (v: variable) =
+			List.length (List.filter (fun x-> x = v) body)
+
 		let ag2cfg (rep: t): ContextFreeGrammarBasic.t =
 			ContextFreeGrammarBasic.cfg_zero
-		
-		let rec validateExp (ag: t) (e: expression): string =
-			let attr_exists attr =
-				List.exists (fun a -> a = attr) (Set.toList ag.synthesized) ||
-				List.exists (fun a -> a = attr) (Set.toList ag.inherited)
-			in
-			let var_exists var =
-				List.exists (fun v -> v = var) (Set.toList ag.variables)
-			in
-			match e with
-			| Int _ -> "int"
-			| String _ -> "string"
-			| Bool _ -> "bool"
-			| Apply (attr, (var, _)) ->
-					if attr_exists attr then
-						if var_exists var then "int"
-						else "erro: variável não encontrada"
-					else "erro: atributo não encontrado"
-			| Expr (op, l, r) ->
-					let tl = validateExp ag l in
-					let tr = validateExp ag r in
-					if tl = tr then
-						match op with
-						| "+" | "*" ->
-								if tl <> "string" then tl
-								else "erro: incompatibilidade de tipos"
-						| "<" | ">" | "<=" | ">=" | "=" | "<>" ->
-								if tl = "int" then "bool"
-								else "erro: incompatibilidade de tipos"
-						| _ -> "erro: operador desconhecido"
-					else "erro: incompatibilidade de tipos"
-		
-		let validateEquation (ag: t) ((lhs, rhs): equation): string =
-			match lhs with
-			| Apply _ ->
-					let lhs_type = validateExp ag lhs in
-					let rhs_type = validateExp ag rhs in
-					if lhs_type = "int" && rhs_type = "int" then "valid"
-					else "erro: incompatibilidade de tipos na equação"
-			| _ -> "erro: lado esquerdo da equação deve ser Apply"
-				
-					
+
+		let validateAttrArg (ag:t) (r:rule) (v,i) =
+			if i = 0 then
+				r.head = v && Set.belongs v ag.inherited
+		else
+			let counter = howMany r.body v in
+				counter >= i
+
+
+		let rec validateExp (ag: t) (r: rule) (e: expression) : string =
+					  let attr_exists attr =
+					    Set.belongs attr (Set.union ag.synthesized ag.inherited)
+					  in
+
+					  let vars_exists vars =
+					    Set.belongs vars ag.variables
+					  in
+
+					  match e with
+					  | Int _ -> "int"
+					  | String _ -> "string"
+					  | Bool _ -> "bool"
+					  | Apply (attr, (var, i)) ->
+					      if attr_exists attr then
+					        if vars_exists var then
+					          if validateAttrArg ag r (var, i) then "int"
+					          else Error.fatal "Variável não encontrada"
+					        else  Error.fatal "Variável não encontrada"
+					      else Error.fatal "Atributo não encontrado"
+					  | Expr (op, l, r_expr) ->
+					      let tl = validateExp ag r l in  (* Pass `r` explicitly *)
+					      let tr = validateExp ag r r_expr in  (* Pass `r` explicitly *)
+					      if tl = tr then
+					        match op with
+					        | "+" | "*" ->
+					            if tl <> "string" then tl
+					            else "erro: Incompatibilidade de tipos"
+					        | "<" | ">" | "<=" | ">=" | "=" | "<>" ->
+					            if tl = "int" then "bool"
+					            else "erro: Incompatibilidade de tipos"
+					        | _ -> "erro: Operador desconhecido"
+					      else "erro: Incompatibilidade de tipos"
+
+		let validateEquation (ag: t) ((lhs, rhs): equation) (r: rule): string =
+		    match lhs with
+		    | Apply _ ->
+		        let lhs_type = validateExp ag r lhs in
+		        let rhs_type = validateExp ag r rhs in
+		        if lhs_type = rhs_type && lhs_type <> "erro" then "valid"
+		        else "erro: incompatibilidade de tipos na equação"
+		    | _ -> "erro: lado esquerdo da equação deve ser Apply"
+
+		    (*fazer vadildação das condições, fazer validar da expr e ver se é booleano*)
+		    (*passo seguinte calcular os atributos utilizando a tree??*)
+		    (*começar com atributos sintetizados*)
+
+
 		let validate (name: string) (rep: AttributeGrammarSupport.t): unit = ()
-			
+
 
 		let accept (rep: t) (w: word): bool =
 			false
-	
+
+        let ag_to_cfg (ag: t): ContextFreeGrammar.t =
+          {
+            alphabet = ag.alphabet;
+            variables = ag.variables;
+            initial = ag.initial;
+            rules = Set.map (fun r ->
+              {
+                ContextFreeGrammar.head = r.head;
+                body = r.body
+              }
+            ) ag.rules
+          }
+
+        let cfg_to_ag (cfg: ContextFreeGrammar.t): t =
+          {
+            alphabet = cfg.alphabet;
+            variables = cfg.variables;
+            synthesized = Set.empty;
+            inherited = Set.empty;
+            initial = cfg.initial;
+            rules = Set.map (fun (r: ContextFreeGrammar.rule) ->
+              {
+                head = r.head;
+                body = r.body;
+                equations = Set.empty;
+                conditions = Set.empty
+              }
+            ) cfg.rules
+          }
+
+
+
 	end
-	
+
 	module AttributeGrammar =
 	struct
 		include AttributeGrammarSupport
 		open AttributeGrammarPrivate
-	
+
 		(* Make *)
 		let make2 (arg: t Arg.alternatives): Entity.t * t = make2 arg validate
 		let make (arg: t Arg.alternatives): t = make arg validate
-	
+
 		(* Exercices support *)
 		let checkProperty (fa: t) (prop: string) =
 			match prop with
 				| _ -> Model.checkProperty prop
-		let checkExercise ex fa = Model.checkExercise ex (accept fa) (checkProperty fa)	
+		let checkExercise ex fa = Model.checkExercise ex (accept fa) (checkProperty fa)
 		let checkExerciseFailures ex fa = Model.checkExerciseFailures ex (accept fa) (checkProperty fa)
-	
+
 		(* Ops *)
 		let stats = Model.stats
 		let accept = accept
 	end
-	
+
 	module AttributeGrammarTop =
 	struct
 		open AttributeGrammar
 	end
-	
+
 	open AttributeGrammarTop
-	
+
 	module AttributeGrammarSupportTests : sig end =
 	struct
 		open AttributeGrammar
 		open AttributeGrammarPrivate
-		
+
 		let active = true
-		
+
 		let ag = {| {
 					kind : "attribute grammar",
 					description : "",
@@ -12826,15 +12876,33 @@ end
 			let h = toJSon g in
 			validate "ag" g;
 			JSon.show h
-					
 
-		let runAll =
-			if Util.testing active "AttributeGrammarSupport" then begin
-				Util.header "test0";
-				test0 ();
-				Util.header "test1";
-				test1 ();
-			end
+
+        let test_ag_to_cfg () =
+            let ag = make (Arg.Text ag) in
+            let cfg = ag_to_cfg ag in
+            let converted_ag = cfg_to_ag cfg in
+            let h = toJSon converted_ag in
+                JSon.show h
+
+        let test_cfg_to_ag () =
+          let ag = make (Arg.Text ag) in
+          let cfg = ag_to_cfg ag in
+          let converted_ag = cfg_to_ag cfg in
+          (* Add assertions to verify the converted AG *)
+          JSon.show (toJSon converted_ag)
+
+        let runAll =
+          if Util.testing active "AttributeGrammarSupport" then begin
+            Util.header "test0";
+            test0 ();
+            Util.header "test1";
+            test1 ();
+            Util.header "test_ag_to_cfg";
+            test_ag_to_cfg ();
+            Util.header "test_cfg_to_ag";
+            test_cfg_to_ag ();
+          end
 	end
 
 

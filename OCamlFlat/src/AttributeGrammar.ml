@@ -29,14 +29,14 @@
  *)
 
 	open BasicTypes
-	open Set  (* Ensure the Set module is opened *)
+	open Set
 
 	module AttributeGrammarPrivate =
 	struct
 		open AttributeGrammarSupport
 
-		let howMany (w: word) (v: variable) =
-			List.length (List.filter (fun x-> x = v) w)
+		let howMany (body: word) (v: variable) =
+			List.length (List.filter (fun x-> x = v) body)
 
 		let ag2cfg (rep: t): ContextFreeGrammarBasic.t =
 			ContextFreeGrammarBasic.cfg_zero
@@ -49,16 +49,13 @@
 				counter >= i
 
 
-
 		let rec validateExp (ag: t) (r: rule) (e: expression) : string =
 					  let attr_exists attr =
-					    let single_attr_set = Set.add attr Set.empty in
-					    Set.subset single_attr_set (Set.union ag.synthesized ag.inherited)
+					    Set.belongs attr (Set.union ag.synthesized ag.inherited)
 					  in
 
 					  let vars_exists vars =
-					    let vars_set = Set.add vars Set.empty in
-					    Set.subset vars_set ag.variables
+					    Set.belongs vars ag.variables
 					  in
 
 					  match e with
@@ -69,9 +66,9 @@
 					      if attr_exists attr then
 					        if vars_exists var then
 					          if validateAttrArg ag r (var, i) then "int"
-					          else "erro: Variável não encontrada"
-					        else "erro: Variável não encontrada"
-					      else "erro: Atributo não encontrado"
+					          else Error.fatal "Variável não encontrada"
+					        else  Error.fatal "Variável não encontrada"
+					      else Error.fatal "Atributo não encontrado"
 					  | Expr (op, l, r_expr) ->
 					      let tl = validateExp ag r l in  (* Pass `r` explicitly *)
 					      let tr = validateExp ag r r_expr in  (* Pass `r` explicitly *)
@@ -91,9 +88,13 @@
 		    | Apply _ ->
 		        let lhs_type = validateExp ag r lhs in
 		        let rhs_type = validateExp ag r rhs in
-		        if lhs_type = "int" && rhs_type = "int" then "valid"
+		        if lhs_type = rhs_type && lhs_type <> "erro" then "valid"
 		        else "erro: incompatibilidade de tipos na equação"
 		    | _ -> "erro: lado esquerdo da equação deve ser Apply"
+
+		    (*fazer vadildação das condições, fazer validar da expr e ver se é booleano*)
+		    (*passo seguinte calcular os atributos utilizando a tree??*)
+		    (*começar com atributos sintetizados*)
 
 
 		let validate (name: string) (rep: AttributeGrammarSupport.t): unit = ()
@@ -102,47 +103,37 @@
 		let accept (rep: t) (w: word): bool =
 			false
 
-
-
-		 let string_to_symbol (s: string): BasicTypes.symbol =
-		   (* Assuming BasicTypes.symbol is a type alias for string *)
-		   BasicTypes.str2symb s
-
-		  (* Updated ga_to_cfg function *)
-        let ga_to_cfg (ag: t): ContextFreeGrammarBasic.t =
-          let rules =
-            let rules_set = ref Set.empty in
-            Set.iter (fun r ->
-              let head_sym = r.head in
-              let body_syms = r.body in
-              let rule = { ContextFreeGrammarBasic.head = head_sym; body = body_syms } in
-              rules_set := Set.add rule !rules_set
-            ) ag.rules;
-            !rules_set
-          in
+        let ag_to_cfg (ag: t): ContextFreeGrammar.t =
           {
             alphabet = ag.alphabet;
             variables = ag.variables;
             initial = ag.initial;
-            rules;
+            rules = Set.map (fun r ->
+              {
+                ContextFreeGrammar.head = r.head;
+                body = r.body
+              }
+            ) ag.rules
           }
 
-        let cfg_to_ga (cfg: ContextFreeGrammarBasic.t): t =
+        let cfg_to_ag (cfg: ContextFreeGrammar.t): t =
           {
             alphabet = cfg.alphabet;
             variables = cfg.variables;
-            synthesized = Set.empty; (* Default value for synthesized attributes *)
-            inherited = Set.empty;   (* Default value for inherited attributes *)
+            synthesized = Set.empty;
+            inherited = Set.empty;
             initial = cfg.initial;
-            rules = (Set.map (fun (r: ContextFreeGrammarBasic.rule) ->
+            rules = Set.map (fun (r: ContextFreeGrammar.rule) ->
               {
                 head = r.head;
                 body = r.body;
-                equations = Set.empty; (* Default value for equations *)
-                conditions = Set.empty; (* Default value for conditions *)
+                equations = Set.empty;
+                conditions = Set.empty
               }
-            ) cfg.rules : AttributeGrammarSupport.rules); (* Correct placement of type annotation *)
+            ) cfg.rules
           }
+
+
 
 	end
 
@@ -210,17 +201,17 @@
 			JSon.show h
 
 
-        let test_ga_to_cfg () =
+        let test_ag_to_cfg () =
             let ag = make (Arg.Text ag) in
-            let cfg = ga_to_cfg ag in
-            let converted_ag = cfg_to_ga cfg in
+            let cfg = ag_to_cfg ag in
+            let converted_ag = cfg_to_ag cfg in
             let h = toJSon converted_ag in
                 JSon.show h
 
-        let test_cfg_to_ga () =
+        let test_cfg_to_ag () =
           let ag = make (Arg.Text ag) in
-          let cfg = ga_to_cfg ag in
-          let converted_ag = cfg_to_ga cfg in
+          let cfg = ag_to_cfg ag in
+          let converted_ag = cfg_to_ag cfg in
           (* Add assertions to verify the converted AG *)
           JSon.show (toJSon converted_ag)
 
@@ -230,10 +221,10 @@
             test0 ();
             Util.header "test1";
             test1 ();
-            Util.header "test_ga_to_cfg";
-            test_ga_to_cfg ();
-            Util.header "test_cfg_to_ga";
-            test_cfg_to_ga ();
+            Util.header "test_ag_to_cfg";
+            test_ag_to_cfg ();
+            Util.header "test_cfg_to_ag";
+            test_cfg_to_ag ();
           end
 	end
 
