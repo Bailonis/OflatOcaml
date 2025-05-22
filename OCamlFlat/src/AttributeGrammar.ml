@@ -49,7 +49,7 @@
 				counter >= i
 
 
-		let rec validateExp (ag: t) (r: rule) (e: expression) : string =
+		let rec validateExp (name: string) (ag: t) (r: rule) (e: expression) : string =
 					  let attr_exists attr =
 					    Set.belongs attr (Set.union ag.synthesized ag.inherited)
 					  in
@@ -66,38 +66,39 @@
 					      if attr_exists attr then
 					        if vars_exists var then
 					          if validateAttrArg ag r (var, i) then "int"
-					          else Error.fatal "Variável não encontrada"
-					        else  Error.fatal "Variável não encontrada"
-					      else Error.fatal "Atributo não encontrado"
+					          else Error.error name  "Variável não encontrada" "error"
+					        else  Error.error name  "Variável não encontrada" "error"
+					      else Error.error name  "Atributo não encontrado" "error"
 					  | Expr (op, l, r_expr) ->
-					      let tl = validateExp ag r l in  (* Pass `r` explicitly *)
-					      let tr = validateExp ag r r_expr in  (* Pass `r` explicitly *)
+					      let tl = validateExp name ag r l in  (* Pass `r` explicitly *)
+					      let tr = validateExp name ag r r_expr in  (* Pass `r` explicitly *)
 					      if tl = tr then
 					        match op with
 					        | "+" | "*" ->
 					            if tl <> "string" then tl
-					            else "erro: Incompatibilidade de tipos"
+					            else Error.error name "Incompatibilidade de tipos" "error"
 					        | "<" | ">" | "<=" | ">=" | "=" | "<>" ->
 					            if tl = "int" then "bool"
-					            else "erro: Incompatibilidade de tipos"
-					        | _ -> "erro: Operador desconhecido"
-					      else "erro: Incompatibilidade de tipos"
+					            else Error.error name "Incompatibilidade de tipos" "error"
+					        | _ -> Error.error name "Operador desconhecido" "error"
+					      else Error.error name "Incompatibilidade de tipos" "error"
 
-		let validateEquation (ag: t) ((lhs, rhs): equation) (r: rule): string =
+		let validateEquation (name: string) (ag: t) ((lhs, rhs): equation) (r: rule): unit =
 		    match lhs with
 		    | Apply _ ->
-		        let lhs_type = validateExp ag r lhs in
-		        let rhs_type = validateExp ag r rhs in
-		        if lhs_type = rhs_type && lhs_type <> "erro" then "valid"
-		        else "erro: incompatibilidade de tipos na equação"
-		    | _ -> "erro: lado esquerdo da equação deve ser Apply"
+		        let lhs_type = validateExp name ag r lhs in
+		        let rhs_type = validateExp name ag r rhs in
+		        if lhs_type = rhs_type && lhs_type <> "erro" then ()
+		        else Error.error name "Incompatibilidade de tipos na equaçao" () (* passar os erros para ingles*)
+		    | _ -> Error.error name "Lado esquerdo da equação deve ser Apply" ()
 
 		    (*fazer vadildação das condições, fazer validar da expr e ver se é booleano*)
 		    (*passo seguinte calcular os atributos utilizando a tree??*)
 		    (*começar com atributos sintetizados*)
 
-
-		let validate (name: string) (rep: AttributeGrammarSupport.t): unit = ()
+        let validateCondition (name: string) (ag: t) (cond: condition) (rule: rule): unit =
+           if validateExp name ag rule cond = "bool" then ()
+           else Error.error name "Condição deve ser booleana" ()
 
 
 		let accept (rep: t) (w: word): bool =
@@ -116,6 +117,8 @@
             ) ag.rules
           }
 
+
+
         let cfg_to_ag (cfg: ContextFreeGrammar.t): t =
           {
             alphabet = cfg.alphabet;
@@ -133,6 +136,25 @@
             ) cfg.rules
           }
 
+        let validateEquations (name: string) (rep: t): unit =
+            Set.iter (fun r ->
+                Set.iter (fun eq ->
+                    validateEquation name rep eq r
+                ) r.equations
+            ) rep.rules
+
+        let validateConditions (name: string) (rep: t): unit =
+            Set.iter (fun r ->
+                Set.iter (fun eq ->
+                    validateCondition name rep eq r
+                ) r.conditions
+            ) rep.rules
+
+        let validate (name: string) (rep: t): unit =
+            let cfg = ag2cfg rep in
+                ContextFreeGrammarPrivate.validate name cfg;
+                validateEquations name rep;
+                validateConditions name rep
 
 
 	end
