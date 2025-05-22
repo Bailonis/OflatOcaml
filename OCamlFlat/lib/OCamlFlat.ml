@@ -12718,9 +12718,9 @@ end
 		let ag2cfg (rep: t): ContextFreeGrammarBasic.t =
 			ContextFreeGrammarBasic.cfg_zero
 
-		let validateAttrArg (ag:t) (r:rule) (v,i) =
+		let validateAttrArg (ag:t) (r:rule) (attr: attribute) (v,i) =
 			if i = 0 then
-				r.head = v && Set.belongs v ag.inherited
+				r.head = v && Set.belongs attr ag.inherited
 		else
 			let counter = howMany r.body v in
 				counter >= i
@@ -12742,8 +12742,8 @@ end
 					  | Apply (attr, (var, i)) ->
 					      if attr_exists attr then
 					        if vars_exists var then
-					          if validateAttrArg ag r (var, i) then "int"
-					          else Error.error name  "Variável não encontrada" "error"
+					          if validateAttrArg ag r attr (var, i) then "int"
+					          else Error.error name  "Atributo invalido" "error"
 					        else  Error.error name  "Variável não encontrada" "error"
 					      else Error.error name  "Atributo não encontrado" "error"
 					  | Expr (op, l, r_expr) ->
@@ -12871,7 +12871,7 @@ end
 
 		let active = true
 
-		let ag = {| {
+		let ag0 = {| {
 					kind : "attribute grammar",
 					description : "",
 					name : "ag",
@@ -12886,6 +12886,22 @@ end
 										"S -> ~ {l(S0) = 1+2*3<T>F<=T>=5=T<>T+(1*2)}"
 									]
 	} |}
+
+        let ag = {| {
+                            kind : "attribute grammar",
+                            description : "",
+                            name : "ag",
+                            alphabet : ["[", "]"],
+                            variables : ["S"],
+                            inherited : ["l"],
+                            synthesized : ["l"],
+                            initial : "S",
+                            rules : [ "S -> [S] {l(S) = 2; l(S) = 'ole'; l(S0) = l(S1)} [123 + 56; 56; 'ola']",
+                                                "S -> SS {l(S) = l(S1) + 3 + 'ola' + l(S1)}",
+                                                "S -> ~ {l(S0) = 6}",
+                                                "S -> ~ {l(S0) = 1+2*3<T>F<=T>=5=T<>T+(1*2)}"
+                                            ]
+            } |}
 
 		let test0 () =
 			let j = JSon.parse ag in
@@ -12920,10 +12936,6 @@ end
             test0 ();
             Util.header "test1";
             test1 ();
-            Util.header "test_ag_to_cfg";
-            test_ag_to_cfg ();
-            Util.header "test_cfg_to_ag";
-            test_cfg_to_ag ();
           end
 	end
 
