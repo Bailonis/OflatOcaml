@@ -242,6 +242,37 @@
             inherited = newInherited;
             rules = newRules;
           }
+
+        let removeUnusedRulesAndVariables (rep: t) =
+          (* Collect all variables and attributes that are used *)
+          let rec collectUsedVariables rules used =
+            match rules with
+            | [] -> used
+            | rule :: rest ->
+                let usedInBody = List.fold_left (fun acc sym -> Set.cons sym acc) used rule.body in
+                collectUsedVariables rest (Set.cons rule.head usedInBody)
+          in
+          let usedVariables = collectUsedVariables (Set.toList rep.rules) (Set.make [rep.initial]) in
+
+          (* Filter variables to exclude unused ones *)
+          let newVariables = Set.filter (fun var -> Set.belongs var usedVariables) rep.variables in
+
+          (* Filter rules to exclude those referencing unused variables *)
+          let newRules =
+            Set.filter
+              (fun rule ->
+                Set.belongs rule.head newVariables &&
+                List.for_all (fun sym -> Set.belongs sym newVariables || Set.belongs sym rep.alphabet) rule.body
+              )
+              rep.rules
+          in
+
+          (* Return the updated grammar *)
+          {
+            rep with
+            variables = newVariables;
+            rules = newRules;
+          }
 	end
 
 	module AttributeGrammar =
