@@ -156,7 +156,92 @@
                 validateEquations name rep;
                 validateConditions name rep
 
+        let removeUnusedAttributes (rep: t) =
+          (* Collect all used attributes from equations and conditions *)
+          let collectUsedAttributes rules =
+            let rec collectFromEquations equations acc =
+              match equations with
+              | [] -> acc
+              | eq :: rest ->
+                  let used =
+                    match eq with
+                    | Apply (attr, _) -> Set.add attr Set.empty
+                    | Expr (_, l, r) -> Set.union (collectFromEquations [l] Set.empty) (collectFromEquations [r] Set.empty)
+                    | _ -> Set.empty
+                    in
+                  collectFromEquations rest (Set.union used acc)
+            in
+            let rec collectFromRules rules acc =
+              match rules with
+              | [] -> acc
+              | rule :: rest ->
+                  let usedInEquations =
+                    List.fold_left
+                      (fun acc (lhs, rhs) ->
+                        let acc = collectFromEquations [lhs] acc in
+                        collectFromEquations [rhs] acc)
+                      acc
+                      (Set.toList rule.equations)
+                  in
+                 let usedInConditions =
+                   List.fold_left (fun acc cond ->
+                     Set.union acc (collectFromEquations [cond] Set.empty)
+                   ) Set.empty (Set.toList rule.conditions)
+                 in
+                  collectFromRules rest (Set.union usedInEquations usedInConditions)
+            in
+            collectFromRules (Set.toList rules) Set.empty
+          in
 
+          let usedAttributes = collectUsedAttributes rep.rules in
+
+          (* Filter synthesized and inherited attributes *)
+          let newSynthesized = Set.filter (fun attr -> Set.belongs attr usedAttributes) rep.synthesized in
+          let newInherited = Set.filter (fun attr -> Set.belongs attr usedAttributes) rep.inherited in
+
+          (* Filter rules to remove unused attributes *)
+          let newRules =
+            Set.filter
+              (fun rule ->
+                let filteredEquations =
+                  Set.filter
+                    (fun (lhs, rhs) ->
+                      let rec checkExpr expr =
+                        match expr with
+                        | Apply (attr, _) -> Set.belongs attr usedAttributes
+                        | Expr (_, left, right) -> checkExpr left && checkExpr right
+                        | _ -> true
+                      in
+                      checkExpr lhs && checkExpr rhs
+                    )
+                    rule.equations
+                in
+                let filteredConditions =
+                  Set.filter
+                    (fun cond ->
+                      let rec checkExpr expr =
+                        match expr with
+                        | Apply (attr, _) -> Set.belongs attr usedAttributes
+                        | Expr (_, left, right) -> checkExpr left && checkExpr right
+                        | _ -> true
+                      in
+                      checkExpr cond
+                    )
+                    rule.conditions
+                in
+                (* Return true if the rule has valid equations and conditions *)
+                not (Set.isEmpty filteredEquations) || not (Set.isEmpty filteredConditions)
+              )
+              rep.rules
+          in
+
+          (* Return the updated attribute grammar *)
+          {
+            rep with
+            synthesized = newSynthesized;
+            inherited = newInherited;
+            rules = newRules;
+          }
 	end
 
 	module AttributeGrammar =
