@@ -59,9 +59,9 @@
 					  in
 
 					  match e with
-					  | Int _ -> "int"
-					  | String _ -> "string"
-					  | Bool _ -> "bool"
+					  | Const (Int _) -> "int"
+					  | Const (String _) -> "string"
+					  | Const (Bool _) -> "bool"
 					  | Apply (attr, (var, i)) ->
 					      if attr_exists attr then
 					        if vars_exists var then
@@ -156,95 +156,38 @@
                 validateEquations name rep;
                 validateConditions name rep
 
-        let removeUnusedAttributes (rep: t) =
-          (* Collect all used attributes from equations and conditions *)
-          let collectUsedAttributes rules =
-            let rec collectFromEquations equations acc =
-              match equations with
-              | [] -> acc
-              | eq :: rest ->
-                  let used =
-                    match eq with
-                    | Apply (attr, _) -> Set.add attr Set.empty
-                    | Expr (_, l, r) -> Set.union (collectFromEquations [l] Set.empty) (collectFromEquations [r] Set.empty)
-                    | _ -> Set.empty
-                    in
-                  collectFromEquations rest (Set.union used acc)
-            in
-            let rec collectFromRules rules acc =
-              match rules with
-              | [] -> acc
-              | rule :: rest ->
-                  let usedInEquations =
-                    List.fold_left
-                      (fun acc (lhs, rhs) ->
-                        let acc = collectFromEquations [lhs] acc in
-                        collectFromEquations [rhs] acc)
-                      acc
-                      (Set.toList rule.equations)
-                  in
-                 let usedInConditions =
-                   List.fold_left (fun acc cond ->
-                     Set.union acc (collectFromEquations [cond] Set.empty)
-                   ) Set.empty (Set.toList rule.conditions)
-                 in
-                  collectFromRules rest (Set.union usedInEquations usedInConditions)
-            in
-            collectFromRules (Set.toList rules) Set.empty
-          in
+        let rec collectFromExpression (exp: expression): attributes =
+          match exp with
+            | Apply (attr, _) -> Set.make [attr]
+            | Expr (_, l, r) -> Set.union (collectFromExpression l) (collectFromExpression r)
+            | _ -> Set.empty
 
-          let usedAttributes = collectUsedAttributes rep.rules in
+        let collectFromEquation (eq: equation): attributes =
+            let (lhs, rhs) = eq in
+            Set.union (collectFromExpression lhs) (collectFromExpression rhs)
 
-          (* Filter synthesized and inherited attributes *)
-          let newSynthesized = Set.filter (fun attr -> Set.belongs attr usedAttributes) rep.synthesized in
-          let newInherited = Set.filter (fun attr -> Set.belongs attr usedAttributes) rep.inherited in
+        let collectFromCondition (cond: condition): attributes =
+            collectFromExpression cond
 
-          (* Filter rules to remove unused attributes *)
-          let newRules =
-            Set.filter
-              (fun rule ->
-                let filteredEquations =
-                  Set.filter
-                    (fun (lhs, rhs) ->
-                      let rec checkExpr expr =
-                        match expr with
-                        | Apply (attr, _) -> Set.belongs attr usedAttributes
-                        | Expr (_, left, right) -> checkExpr left && checkExpr right
-                        | _ -> true
-                      in
-                      checkExpr lhs && checkExpr rhs
-                    )
-                    rule.equations
-                in
-                let filteredConditions =
-                  Set.filter
-                    (fun cond ->
-                      let rec checkExpr expr =
-                        match expr with
-                        | Apply (attr, _) -> Set.belongs attr usedAttributes
-                        | Expr (_, left, right) -> checkExpr left && checkExpr right
-                        | _ -> true
-                      in
-                      checkExpr cond
-                    )
-                    rule.conditions
-                in
-                (* Return true if the rule has valid equations and conditions *)
-                not (Set.isEmpty filteredEquations) || not (Set.isEmpty filteredConditions)
-              )
-              rep.rules
-          in
+        let collectFromRule (r: rule): attributes =
+            let fromEquations = Set.flat_map collectFromEquation r.equations in
+            let fromConditions = Set.flat_map collectFromCondition r.conditions in
+            Set.union fromEquations fromConditions
 
-          (* Return the updated attribute grammar *)
-          {
-            rep with
-            synthesized = newSynthesized;
-            inherited = newInherited;
-            rules = newRules;
-          }
+        let removeUnusedAttributes (rep: t): t =
+            let used = Set.flat_map collectFromRule rep.rules in
+            let newSynthesized = Set.inter rep.synthesized used in
+            let newInherited = Set.inter rep.inherited used in
+           {
+              rep with
+              synthesized = newSynthesized;
+              inherited = newInherited;
+            }
+
+        let collectVarsFromRule (r: rule) (vars: variables): variables =
+          Set.inter vars (Set.make r.body)
 
         let removeUnusedRulesAndVariables (rep: t) =
-          (* Collect all variables and attributes that are used *)
           let rec collectUsedVariables rules used =
             match rules with
             | [] -> used
@@ -253,11 +196,7 @@
                 collectUsedVariables rest (Set.cons rule.head usedInBody)
           in
           let usedVariables = collectUsedVariables (Set.toList rep.rules) (Set.make [rep.initial]) in
-
-          (* Filter variables to exclude unused ones *)
           let newVariables = Set.filter (fun var -> Set.belongs var usedVariables) rep.variables in
-
-          (* Filter rules to exclude those referencing unused variables *)
           let newRules =
             Set.filter
               (fun rule ->
@@ -266,13 +205,86 @@
               )
               rep.rules
           in
+          { rep with variables = newVariables; rules = newRules }
 
-          (* Return the updated grammar *)
-          {
-            rep with
-            variables = newVariables;
-            rules = newRules;
-          }
+        let getRoot (pt: parseTree): node =
+                match pt with
+                | Leaf ((s,e)) -> (s,e)
+                | Node ((s,e), _) -> (s,e)
+
+        let getRootSymbol (pt: parseTree): symbol =
+            getRoot pt |> fst
+
+        let getRule (ag: t) (head: variable) (body: word): rule =
+            Set.find (fun r -> r.head = head && r.body = body) ag.rules
+
+        let rec associ key i l =
+            match l with
+                | [] ->
+                    failwith "associ"
+                | (a,b)::xs when a = key ->
+                    if i = 1 || i = -1 then b
+                    else associ key (i-1) xs
+                | (a,b)::xs ->
+                    associ key i xs
+
+       (*
+let rec replace (expr: expression) (nodes: node list): expression =
+           match expr with
+           | Apply (attr, (var, i)) ->
+                let (_, evals) = associ var i nodes in
+                let value = Set.find (fun (a, _) -> a = attr) evals in
+                Int value
+           | Expr (op, left, right) ->
+                Expr (op, replace left nodes, replace right nodes)
+           | _ -> expr *)
+        let evaluateOp (op: string) (l: value) (r:value): value =
+            match op with
+                | "+" ->(
+                    match (l, r) with
+                    | Int li, Int ri -> Int (li + ri)
+                    | String ls, String rs -> String (ls ^ rs)
+                    | _ -> failwith "Invalid expression in evaluation"
+                )
+                | "*" -> (
+                    match (l, r) with
+                    | Int li, Int ri -> Int (li * ri)
+                    | _ -> failwith "Invalid expression in evaluation"
+                )
+
+                (* acabar isto com os outros valores  -> *)
+                | _ -> failwith "Unknown operator in evaluation"
+
+       let rec evaluate (e: expression) (nodes: node list): value =
+            match e with
+            | Const v -> v
+            | Apply (attr, (var, i)) ->
+                let evals = associ var i nodes in
+                let (_,b) = Set.find (fun (a, _) -> a = attr) evals in
+                b
+            | Expr (op, left, right) ->
+                let l = evaluate left  nodes in
+                let r = evaluate right nodes in
+                evaluateOp op l r
+
+
+       let eval (e: equation) (children: parseTree list): evaluation =
+            let nodes = List.map getRoot children in
+            match e with
+            | (Apply (attr, (var, _)), expr) ->
+                (attr, evaluate expr nodes)
+            | _ -> failwith "Invalid equation in evaluation"
+
+       let rec calcAtributes (ag: t) (pt: parseTree): parseTree =
+            match pt with
+                | Leaf n -> Leaf n (*ainda não ha semente*)
+                | Node ((head,_), children) ->
+                    let body = List.map getRootSymbol children in
+                    let rule = getRule ag head body in
+                    let children = List.map (calcAtributes ag) children in
+                    let evals = Set.map (fun e -> eval e children) rule.equations in
+                    Node ((head, evals), children)
+
 	end
 
 	module AttributeGrammar =

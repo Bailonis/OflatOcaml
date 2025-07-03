@@ -32,10 +32,12 @@ struct
 	type attribute = symbol
 	type attributes = attribute set
 	type attrArg = variable * int
+	type value =
+	    | Int of int
+        | String of string
+        | Bool of bool
 	type expression =
-		| Int of int
-		| String of string
-		| Bool of bool
+		| Const of value
 		| Apply of attribute * attrArg
 		| Expr of string * expression * expression
 	type equation = expression * expression
@@ -43,13 +45,14 @@ struct
 	type condition = expression 
 	type conditions = condition set
 
+
 	(*
  * condition: tem que ser booleano
  * equation do lado esquerdo é um apply
  *)
 
 	type rule = {
-		head : symbol;
+		head : variable;
 		body : word;
 		equations : equations;
 		conditions : conditions
@@ -64,10 +67,6 @@ struct
 		initial : variable;
 		rules : rules
 	}
-	
-	type parseTree =
-		  Leaf of symbol
-		| Root of symbol * parseTree list
 
 	let kind = "attribute grammar"
 
@@ -79,6 +78,19 @@ struct
 		initial = draftVar;
 		rules = Set.empty;
 	}
+
+
+
+	type evaluation = attribute * value
+
+	type evaluations = evaluation set
+
+    type node = symbol * evaluations
+
+    type parseTree =
+              Leaf of node
+            | Node of node * parseTree list
+
 end
 
 module ExpressionSyntax =
@@ -99,14 +111,14 @@ struct
 		
 	let rec parseExp3 (): expression =
 		match peek () with
-		| c when isDigit c -> Int (getInt ())
-		| '\'' -> String (getDelim '\'' '\'')
-		| 'T' -> skip (); Bool true
-		| 'F' -> skip (); Bool false
+		| c when isDigit c -> Const (Int (getInt ()))
+		| '\'' ->  Const (String (getDelim '\'' '\''))
+		| 'T' -> skip (); Const (Bool true)
+		| 'F' -> skip (); Const (Bool false)
 		| '(' -> let _ = getChar '(' in
 				let e = parseExp0 () in
 				let _ = getChar ')' in
-					Expr ("(", e, Int 0)
+					Expr ("(", e, Const (Int 0))
 		| _ -> parseApply ()
 
 	and parseExp2 (): expression =
@@ -153,11 +165,11 @@ struct
 	
 	let rec expression2str e =
 		match e with
-		| Int i ->
+		| Const (Int i) ->
 			string_of_int i
-		| String s ->
+		| Const (String s) ->
 			"\"" ^ s ^ "\""
-		| Bool b ->
+		| Const (Bool b) ->
 			if b then "T" else "F"
 		| Apply (attr, (var, i)) when i = -1 ->
 			symb2str attr ^ "(" ^ symb2str var ^ ")"
