@@ -43,7 +43,7 @@
 
 		let validateAttrArg (ag:t) (r:rule) (attr: attribute) (v,i) =
 			if i = 0 then
-				r.head = v && Set.belongs attr ag.inherited
+				r.head = v && Set.belongs attr (Set.union ag.synthesized ag.inherited)
 		else
 			let counter = howMany r.body v in
 				counter >= i
@@ -354,16 +354,57 @@ let rec replace (expr: expression) (nodes: node list): expression =
                                             ]
             } |}
 
+         let ag1 = {| {
+                                    kind : "attribute grammar",
+                                    description : "",
+                                    name : "ag1",
+                                    alphabet : ["[", "]"],
+                                    variables : ["S","E","F"],
+                                    inherited : [""],
+                                    synthesized : ["v"],
+                                    initial : "S",
+                                    rules : [ "S -> E {v(S) = v(E)}",
+                                                "E -> E + F {v(E0) = v(E1) + v(F)}",
+                                                "E -> F {v(E) = v(F)}",
+                                                "F -> 0 {v(F) = 0}",
+                                                "F -> 1 {v(F) = 1}",
+                                                "F -> 2 {v(F) = 2}",
+                                                "F -> 3 {v(F) = 3}",
+                                                "F -> 4 {v(F) = 4}",
+                                                "F -> 5 {v(F) = 5}",
+                                                "F -> 6 {v(F) = 6}",
+                                                "F -> 7 {v(F) = 7}",
+                                                "F -> 8 {v(F) = 8}",
+                                                "F -> 9 {v(F) = 9}"
+                                                ]
+                    } |}
+
+
+        let e s = (symb s, Set.empty);;
+
+        let pt =
+            Node (e "S", [
+                Node (e "E", [
+                    Node (e "F", [
+                        Leaf (e "1")
+                    ])
+                ]);
+                Leaf (e "+");
+                Node (e "F", [
+                    Leaf (e "2")
+                ])
+            ])
+
 		let test0 () =
-			let j = JSon.parse ag in
+			let j = JSon.parse ag1 in
 			let g = fromJSon j in
 			let h = toJSon g in
 				JSon.show h
 
 		let test1 () =
-			let g = make (Arg.Text ag) in
+			let g = make (Arg.Text ag1) in
 			let h = toJSon g in
-			validate "ag" g;
+			validate "ag1" g;
 			JSon.show h
 
 

@@ -38,7 +38,7 @@ struct
         | Bool of bool
 	type expression =
 		| Const of value
-		| Apply of attribute * attrArg
+		| Apply of attribute * attrArg (* l(A2) *)
 		| Expr of string * expression * expression
 	type equation = expression * expression
 	type equations = equation set
