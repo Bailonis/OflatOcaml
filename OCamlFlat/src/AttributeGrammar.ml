@@ -300,18 +300,23 @@ let rec replace (expr: expression) (nodes: node list): expression =
              ) evals;
              List.iter print_parse_tree children
 
-       let rec calcAtributes (ag: t) (pt: parseTree): parseTree =
-          match pt with
-          | Leaf n ->
-              Leaf n
-          | Node ((head, _), children) ->
-              let body = List.map getRootSymbol children in
-              let rule = getRule ag head body in
-              let children = List.map (calcAtributes ag) children in
-              let evals = Set.map (fun e ->
-                eval e children
-              ) rule.equations in
-              Node ((head, evals), children)
+      let rec calcAtributes (ag: t) (pt: parseTree): parseTree =
+        match pt with
+        | Leaf n ->
+            Leaf n
+        | Node ((head, _), children) ->
+            let body = List.map getRootSymbol children in
+            Printf.printf "Head: %s\n" (symb2str head);
+            Printf.printf "Body: %s\n" (String.concat ", " (List.map symb2str body));
+            let rule = getRule ag head body in
+            let children = List.map (calcAtributes ag) children in
+            let evals = Set.map (fun e ->
+              eval e children
+            ) rule.equations in
+            let result = Node ((head, evals), children) in
+            Printf.printf "Current parse tree:\n";
+            print_parse_tree result;
+            result
 	end
 
 	module AttributeGrammar =
@@ -405,6 +410,33 @@ let rec replace (expr: expression) (nodes: node list): expression =
                                                 "F -> 9 {v(F) = 9}"
                                                 ]
                     } |}
+        let ag2 = {| {
+                                            kind : "attribute grammar",
+                                            description : "",
+                                            name : "ag2",
+                                            alphabet : ["[", "]"],
+                                            variables : ["S","E","F","X"],
+                                            inherited : ["d"],
+                                            synthesized : ["v", "r"],
+                                            initial : "S",
+                                            rules : [ "S -> E {v(S) = v(E)}",
+                                                        "E -> F X {v(E) = r(X)}",
+                                                        "E -> F X {d(X) = v(F)}",
+                                                        "X -> + F X {d(X1) =  d(X0) + v(F)}",
+                                                        "X -> + F X {r(X0) = r(X1)}",
+                                                        "X -> y {r(X) = d(X)}",
+                                                        "F -> 0 {v(F) = 0}",
+                                                        "F -> 1 {v(F) = 1}",
+                                                        "F -> 2 {v(F) = 2}",
+                                                        "F -> 3 {v(F) = 3}",
+                                                        "F -> 4 {v(F) = 4}",
+                                                        "F -> 5 {v(F) = 5}",
+                                                        "F -> 6 {v(F) = 6}",
+                                                        "F -> 7 {v(F) = 7}",
+                                                        "F -> 8 {v(F) = 8}",
+                                                        "F -> 9 {v(F) = 9}"
+                                                        ]
+                            } |}
 
 
         let e s = (symb s, Set.empty);;
@@ -424,8 +456,32 @@ let rec replace (expr: expression) (nodes: node list): expression =
               ])
           ])
 
+         let parse_tree =
+           Node (e "S", [
+               Node (e "E", [
+                   Node (e "F", [
+                       Leaf (e "3")
+                   ]);
+                   Node (e "X", [
+                       Leaf (e "+");
+                       Node (e "F", [
+                           Leaf (e "2")
+                       ]);
+                       Node (e "X", [
+                           Leaf (e "+");
+                           Node (e "F", [
+                               Leaf (e "9")
+                           ]);
+                           Node (e "X", [
+                               Leaf (e "y")
+                           ])
+                       ])
+                   ])
+               ])
+           ])
+
 		let test0 () =
-			let j = JSon.parse ag1 in
+			let j = JSon.parse ag2 in
 			let g = fromJSon j in
 			let h = toJSon g in
 				JSon.show h
@@ -435,7 +491,10 @@ let rec replace (expr: expression) (nodes: node list): expression =
 			let newTree = calcAtributes g pt in
 			print_parse_tree newTree
 
-
+        let test2 () =
+            let g = make (Arg.Text ag2) in
+            let newTree = calcAtributes g parse_tree in
+            print_parse_tree newTree
 
         let test_ag_to_cfg () =
             let ag = make (Arg.Text ag) in
@@ -453,8 +512,8 @@ let rec replace (expr: expression) (nodes: node list): expression =
 
         let runAll =
           if Util.testing active "AttributeGrammarSupport" then begin
-            Util.header "test1";
-            test1 ();
+            Util.header "test2";
+            test2 ();
           end
 	end
 
