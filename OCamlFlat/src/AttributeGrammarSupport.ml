@@ -272,6 +272,7 @@ struct
 	let rec parseBody (): word =
 		match peek() with
 		| ' ' | '{' -> []
+		| '~' -> skip (); parseBody ()
 		| _ -> let sy = parseSymbol () in
 					sy::parseBody ()
 

@@ -70,8 +70,8 @@
 					        else  Error.error name  "Variável não encontrada" "error"
 					      else Error.error name  "Atributo não encontrado" "error"
 					  | Expr (op, l, r_expr) ->
-					      let tl = validateExp name ag r l in  (* Pass `r` explicitly *)
-					      let tr = validateExp name ag r r_expr in  (* Pass `r` explicitly *)
+					      let tl = validateExp name ag r l in
+					      let tr = validateExp name ag r r_expr in
 					      if tl = tr then
 					        match op with
 					        | "+" | "*" ->
@@ -217,32 +217,27 @@
 
         let getRule (ag: t) (head: variable) (body: word): rule =
           try
-            Set.find (fun r -> r.head = head && r.body = body) ag.rules
+            Set.find (fun r ->
+             r.head = head && r.body = body) ag.rules
           with Not_found ->
+
             failwith (Printf.sprintf "No matching rule found for head: %s and body: %s"
               (symb2str head)
               (String.concat ", " (List.map symb2str body)))
 
-        let rec associ key i l =
-            match l with
-                | [] ->
-                    failwith "associ"
-                | (a,b)::xs when a = key ->
-                    if i = 1 || i = -1 then b
-                    else associ key (i-1) xs
-                | (a,b)::xs ->
-                    associ key i xs
+       let rec associ key i l =
+           Printf.printf "Searching for key: %s, index: %d in list: [%s]\n"
+             (symb2str key) i
+             (String.concat "; " (List.map (fun (a, _) -> symb2str a) l));
+           match l with
+           | [] ->
+               failwith (Printf.sprintf "associ: Key '%s' with index %d not found in the list" (symb2str key) i)
+           | (a, b) :: xs when a = key ->
+               if i = 1 || i = -1 then b
+               else associ key (i - 1) xs
+           | (a, b) :: xs ->
+               associ key i xs
 
-       (*
-let rec replace (expr: expression) (nodes: node list): expression =
-           match expr with
-           | Apply (attr, (var, i)) ->
-                let (_, evals) = associ var i nodes in
-                let value = Set.find (fun (a, _) -> a = attr) evals in
-                Int value
-           | Expr (op, left, right) ->
-                Expr (op, replace left nodes, replace right nodes)
-           | _ -> expr *)
         let evaluateOp (op: string) (l: value) (r:value): value =
             match op with
                 | "+" ->(
@@ -273,11 +268,24 @@ let rec replace (expr: expression) (nodes: node list): expression =
                 evaluateOp op l r
 
 
-       let eval (e: equation) (children: parseTree list): evaluation =
-            let nodes = List.map getRoot children in
+        let rec update a b l =
+            match l with
+            | [] -> [(a, b)]
+            | (x, y) :: xs when x = a -> (x, b) :: xs
+            | x :: xs -> x :: update a b xs
+
+        (* Evaluate an equation and update the list of evaluations *)
+       let eval (e: equation) (nodes: node list): node list =
             match e with
             | (Apply (attr, (var, _)), expr) ->
-                (attr, evaluate expr nodes)
+            (try
+                let ev = (attr, evaluate expr nodes) in
+                let evs = List.assoc var nodes in
+                let new_evs = Set.cons ev evs in
+                update var new_evs nodes
+            with _ ->
+                nodes
+             )
             | _ -> failwith "Invalid equation in evaluation"
 
         let printAllHeadsAndBodies (ag: t): unit =
@@ -286,7 +294,7 @@ let rec replace (expr: expression) (nodes: node list): expression =
             Printf.printf "Body: %s\n" (String.concat ", " (List.map symb2str r.body))
           ) ag.rules
 
-       let rec print_parse_tree pt =
+        let rec print_parse_tree pt =
          match pt with
          | Leaf (symbol, _) ->
              Printf.printf "Leaf: %s\n" (symb2str symbol)
@@ -300,23 +308,33 @@ let rec replace (expr: expression) (nodes: node list): expression =
              ) evals;
              List.iter print_parse_tree children
 
+      let updateRoot a n =
+            match a with
+            | Leaf _ -> Leaf n
+            | Node (_, children) ->
+                   Node (n, children)
+
       let rec calcAtributes (ag: t) (pt: parseTree): parseTree =
         match pt with
         | Leaf n ->
             Leaf n
-        | Node ((head, _), children) ->
+        | Node (_, children) ->
+            let head = getRootSymbol pt in
             let body = List.map getRootSymbol children in
-            Printf.printf "Head: %s\n" (symb2str head);
-            Printf.printf "Body: %s\n" (String.concat ", " (List.map symb2str body));
             let rule = getRule ag head body in
+
             let children = List.map (calcAtributes ag) children in
-            let evals = Set.map (fun e ->
-              eval e children
-            ) rule.equations in
-            let result = Node ((head, evals), children) in
+            let all = pt::children in
+            let nodes = List.map getRoot all in
+            let nodes = Set.fold_left (fun a e ->  eval e a) nodes rule.equations in
+            let all = List.map2 (fun a n -> updateRoot a n) all nodes in
+            let result = Node (getRoot (List.hd all), List.tl all) in
             Printf.printf "Current parse tree:\n";
             print_parse_tree result;
             result
+
+
+
 	end
 
 	module AttributeGrammar =
@@ -396,7 +414,7 @@ let rec replace (expr: expression) (nodes: node list): expression =
                                     synthesized : ["v"],
                                     initial : "S",
                                     rules : [ "S -> E {v(S) = v(E)}",
-                                                "E -> E + F {v(E0) = v(E1) + v(F)}",
+                                                "E -> E * F {v(E0) = v(E1) * v(F)}",
                                                 "E -> F {v(E) = v(F)}",
                                                 "F -> 0 {v(F) = 0}",
                                                 "F -> 1 {v(F) = 1}",
@@ -420,11 +438,9 @@ let rec replace (expr: expression) (nodes: node list): expression =
                                             synthesized : ["v", "r"],
                                             initial : "S",
                                             rules : [ "S -> E {v(S) = v(E)}",
-                                                        "E -> F X {v(E) = r(X)}",
-                                                        "E -> F X {d(X) = v(F)}",
-                                                        "X -> + F X {d(X1) =  d(X0) + v(F)}",
-                                                        "X -> + F X {r(X0) = r(X1)}",
-                                                        "X -> y {r(X) = d(X)}",
+                                                        "E -> F X {v(E) = r(X) ; d(X) = v(F)}",
+                                                        "X -> + F X {r(X0) = r(X1) ; d(X1) = d(X0) + v(F)}",
+                                                        "X -> ~ {r(X) = d(X)}",
                                                         "F -> 0 {v(F) = 0}",
                                                         "F -> 1 {v(F) = 1}",
                                                         "F -> 2 {v(F) = 2}",
@@ -446,10 +462,10 @@ let rec replace (expr: expression) (nodes: node list): expression =
               Node (e "E", [
                   Node (e "E", [
                       Node (e "F", [
-                          Leaf (e "2")
+                          Leaf (e "3")
                       ])
                   ]);
-                  Leaf (e "+");
+                  Leaf (e "*");
                   Node (e "F", [
                       Leaf (e "2")
                   ])
@@ -473,7 +489,7 @@ let rec replace (expr: expression) (nodes: node list): expression =
                                Leaf (e "9")
                            ]);
                            Node (e "X", [
-                               Leaf (e "y")
+                               Leaf (e "~")
                            ])
                        ])
                    ])
@@ -491,7 +507,8 @@ let rec replace (expr: expression) (nodes: node list): expression =
 			let newTree = calcAtributes g pt in
 			print_parse_tree newTree
 
-        let test2 () =
+
+	    let test2 () =
             let g = make (Arg.Text ag2) in
             let newTree = calcAtributes g parse_tree in
             print_parse_tree newTree
@@ -513,7 +530,7 @@ let rec replace (expr: expression) (nodes: node list): expression =
         let runAll =
           if Util.testing active "AttributeGrammarSupport" then begin
             Util.header "test2";
-            test2 ();
+            test2();
           end
 	end
 
