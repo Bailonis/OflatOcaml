@@ -31,6 +31,11 @@
 	open BasicTypes
 	open Set
 
+    module SetUtil = struct
+      let to_list s =
+        Set.fold_left (fun acc x -> x :: acc) [] s |> List.rev
+    end
+
 	module AttributeGrammarPrivate =
 	struct
 		open AttributeGrammarSupport
@@ -208,6 +213,11 @@
           { rep with variables = newVariables; rules = newRules }
 (* ***************************************************************** *)
 
+
+
+       let set_filter pred (s : 'a Set.t) : 'a Set.t =
+         Set.fold_left (fun acc x -> if pred x then Set.cons x acc else acc) (Set.make []) s
+
        (* Split the evaluation environment into (head, children).
           'nodes' is built as [head :: children] upstream. *)
        let split_env (nodes: node list) : node * node list =
@@ -331,26 +341,56 @@
                 (* acabar isto com os outros valores  -> *)
                 | _ -> failwith "Unknown operator in evaluation"
 
-       let rec evaluate (e: expression) (nodes: node list): value =
+
+       (* Normalize default index: if i = -1 and var = head_sym, use head (0); else keep *)
+       let normalize_default_index (head_sym : symbol) (var : symbol) (i : int) : int =
+         if i = -1 && var = head_sym then 0 else i
+
+      let is_inherited_eq_for (head_sym : symbol) (eq : equation) : bool =
+        match eq with
+        | (Apply (_attr, (var, i)), _rhs) ->
+            (* Normalize: if i = -1 and var = head, treat as i = 0 (head) *)
+            let i' = normalize_default_index head_sym var i in
+            i' <> 0
+        | _ ->
+            false  (* or fail if you never expect other LHS forms *)
+
+       let rec evaluate (head_sym : symbol) (e: expression) (nodes: node list): value =
          match e with
          | Const v -> v
          | Apply (attr, (var, i)) ->
+             let i' = normalize_default_index head_sym var i in
              let evals =
-               try find_evals var i nodes with
+               try find_evals var i' nodes with
                | Failure msg ->
                    failwith (Printf.sprintf "evaluate: cannot resolve %s(%s[%d]) – %s"
-                               (symb2str attr) (symb2str var) i msg)
+                               (symb2str attr) (symb2str var) i' msg)
              in
              (try
                 let (_, b) = Set.find (fun (a, _) -> a = attr) evals in
                 b
               with _ ->
                 failwith (Printf.sprintf "evaluate: attribute '%s' not found on %s[%d]"
-                            (symb2str attr) (symb2str var) i))
+                            (symb2str attr) (symb2str var) i'))
          | Expr (op, left, right) ->
-             let l = evaluate left nodes in
-             let r = evaluate right nodes in
+             let l = evaluate head_sym left nodes in
+             let r = evaluate head_sym right nodes in
              evaluateOp op l r
+
+       (* Evaluate an equation and update the node list *)
+       let eval (head_sym : symbol) (e: equation) (nodes: node list): node list =
+         match e with
+         | (Apply (attr, (var, i)), expr) ->
+             let i' = normalize_default_index head_sym var i in
+             let value =
+               try evaluate head_sym expr nodes with
+               | Failure msg ->
+                   failwith (Printf.sprintf "eval %s.%s[%d]: %s"
+                               (symb2str var) (symb2str attr) i' msg)
+             in
+             update_target var i' attr value nodes
+         | _ ->
+             failwith "Invalid equation in evaluation"
 
 
 
@@ -359,25 +399,6 @@
             | [] -> [(a, b)]
             | (x, y) :: xs when x = a -> (x, b) :: xs
             | x :: xs -> x :: update a b xs
-
-       (* Evaluate an equation and update the list of evaluations *)
-       let eval (e: equation) (nodes: node list): node list =
-         match e with
-         | (Apply (attr, (var, i)), expr) ->
-             (* Evaluate RHS normally *)
-             let value =
-               try evaluate expr nodes with
-               | Failure msg ->
-                   failwith (Printf.sprintf "eval %s.%s[%d]: %s"
-                               (symb2str var) (symb2str attr) i msg)
-             in
-             (* LHS index coercion:
-                If i = -1 (bare) and var == head symbol, treat as i = 0 (head). *)
-             let ((head_sym, _), _) = split_env nodes in
-             let j = if i = -1 && var = head_sym then 0 else i in
-             update_target var j attr value nodes
-         | _ ->
-             failwith "Invalid equation in evaluation"
 
         let printAllHeadsAndBodies (ag: t): unit =
           Set.iter (fun r ->
@@ -423,44 +444,96 @@
             | Node (_, children) ->
                    Node (n, children)
 
-      let calcAtributesAtRoot (ag: t) (pt: parseTree): parseTree =
-         match pt with
-        | Leaf n ->
-            Leaf n
-        | Node (_, children) ->
-             let rule: AttributeGrammarSupport.rule = getRootRule ag pt in
-       AttributeGrammarSyntax.show (Set.make [rule]);
-            let equations = rule.equations in
-            let all = pt::children in
- 			let nodes = List.map getRoot all in
-            let nodes = Set.fold_left (fun a e -> eval e a) nodes equations in
-            let all = List.map2 (fun a n -> updateRoot a n) all nodes in
-            Printf.printf "Root node attributes:\n";
-            Set.iter (fun (attr, value) ->
-              match value with
-              | Int v -> Printf.printf "  %s = %d\n" (symb2str attr) v
-              | _ -> ()
-            ) (snd (List.hd nodes));
-            let pt = Node (List.hd nodes, List.tl all) in
-				pt
+      let apply_equations_at_head
+          (head_sym : symbol)
+          (nodes    : node list)
+          (equations : equation list)
+        : node list =
+        (* Sanity: env must be [head :: children] and match head_sym *)
+        let () =
+          match nodes with
+          | [] ->
+              failwith "apply_equations_at_head: empty environment (nodes)"
+          | (hs, _) :: _ when hs = head_sym -> ()
+          | (hs, _) :: _ ->
+              failwith
+                (Printf.sprintf
+                   "apply_equations_at_head: head symbol mismatch (expected %s, got %s)"
+                   (symb2str head_sym) (symb2str hs))
+        in
+        List.fold_left
+          (fun acc_nodes eq -> eval head_sym eq acc_nodes)
+          nodes
+          equations
 
       let rec calcAtributes (ag: t) (pt: parseTree): parseTree =
-         match pt with
+        match pt with
         | Leaf n ->
             Leaf n
-        | Node (_, _) ->
-	(* inherited *)
-	(*	let pt = calcAtributesAtRoot ag pt in *)
-	(* recursion *)
-		let root = getRoot pt in
-		let children = getChildren pt in
-        let pt = Node (root, List.map (calcAtributes ag) children) in
-	(* synthetized *)
-		let pt = calcAtributesAtRoot ag pt in
 
-        Printf.printf "Current parse tree:\n";
-        print_parse_tree pt;
-        pt
+        | Node (_, _) ->
+            (* 0) Get rule and equations as list (deterministic order) *)
+            let rule = getRootRule ag pt in
+            let equations : equation list = SetUtil.to_list rule.equations in
+
+            let head_sym = getRootSymbol pt in
+            let children0 = getChildren pt in
+
+            (* Build environment [head :: children] as nodes *)
+            let env0 : node list = List.map getRoot (pt :: children0) in
+
+            (* Partition equations using NORMALIZED index wrt head_sym *)
+            let is_inherited_eq_for (eq : equation) : bool =
+              match eq with
+              | (Apply (_attr, (var, i)), _rhs) ->
+                  let i' = normalize_default_index head_sym var i in
+                  i' <> 0
+              | _ -> false
+            in
+            let inh_eqs, syn_eqs =
+              List.partition is_inherited_eq_for equations
+            in
+
+            (* 1) INHERITED: apply only equations that target children *)
+            let env1 = apply_equations_at_head head_sym env0 inh_eqs in
+
+            (* Rebuild pt with inherited attributes before recursion *)
+            let all0 = pt :: children0 in
+            let all1 : parseTree list = List.map2 (fun a n -> updateRoot a n) all0 env1 in
+            let pt1 : parseTree =
+              match all1 with
+              | new_head_pt :: new_children_pts ->
+                  Node (getRoot new_head_pt, new_children_pts)
+              | _ ->
+                  failwith "calcAtributes: empty env after inherited phase"
+            in
+
+            (* 2) RECURSE: compute children with their inherited attrs present *)
+            let rec_children : parseTree list =
+              getChildren pt1 |> List.map (calcAtributes ag)
+            in
+            let pt2 : parseTree = Node (getRoot pt1, rec_children) in
+
+            (* 3) SYNTHESIZED: now that children are computed, update head *)
+            let env2 : node list =
+              let head2 = getRoot pt2 in
+              let child_nodes2 = rec_children |> List.map getRoot in
+              head2 :: child_nodes2
+            in
+            let env3 = apply_equations_at_head head_sym env2 syn_eqs in
+
+            let all2 = pt2 :: rec_children in
+            let all3 : parseTree list = List.map2 (fun a n -> updateRoot a n) all2 env3 in
+
+            match all3 with
+            | new_head_pt :: new_children_pts ->
+                let result = Node (getRoot new_head_pt, new_children_pts) in
+                (* Optional debug *)
+                (* Printf.printf "Current parse tree:\n"; *)
+                (* print_parse_tree result; *)
+                result
+            | _ ->
+                failwith "calcAtributes: unexpected state after synthesized phase"
 	end
 
 	module AttributeGrammar =
@@ -500,44 +573,44 @@
         let e s = (symb s, Set.empty);;
 
         let ag1 = {| {
-                kind : "attribute grammar",
-                description : "",
-                name : "ag1",
-                alphabet : ["[", "]"],
-                variables : ["S","E","F"],
-                inherited : [""],
-                synthesized : ["v"],
-                initial : "S",
-                rules : [ "S -> E {v(S) = v(E)}",
-                            "E -> E + F {v(E0) = v(E1) + v(F)}",
-                            "E -> F {v(E) = v(F)}",
-                            "F -> 0 {v(F) = 0}",
-                            "F -> 1 {v(F) = 1}",
-                            "F -> 2 {v(F) = 2}",
-                            "F -> 3 {v(F) = 3}",
-                            "F -> 4 {v(F) = 4}",
-                            "F -> 5 {v(F) = 5}",
-                            "F -> 6 {v(F) = 6}",
-                            "F -> 7 {v(F) = 7}",
-                            "F -> 8 {v(F) = 8}",
-                            "F -> 9 {v(F) = 9}"
-                            ]
-                } |}
+                        kind : "attribute grammar",
+                        description : "",
+                        name : "ag1",
+                        alphabet : ["[", "]"],
+                        variables : ["S","E","F"],
+                        inherited : [""],
+                        synthesized : ["v"],
+                        initial : "S",
+                        rules : [ "S -> E {v(S) = v(E)}",
+                                    "E -> E * F {v(E0) = v(E1) * v(F)}",
+                                    "E -> F {v(E) = v(F)}",
+                                    "F -> 0 {v(F) = 0}",
+                                    "F -> 1 {v(F) = 1}",
+                                    "F -> 2 {v(F) = 2}",
+                                    "F -> 3 {v(F) = 3}",
+                                    "F -> 4 {v(F) = 4}",
+                                    "F -> 5 {v(F) = 5}",
+                                    "F -> 6 {v(F) = 6}",
+                                    "F -> 7 {v(F) = 7}",
+                                    "F -> 8 {v(F) = 8}",
+                                    "F -> 9 {v(F) = 9}"
+                                    ]
+                        } |}
 
         let pt1 =
-                Node (e "S", [
-                    Node (e "E", [
-                         Node (e "E", [
-                             Node (e "F", [
-                                  Leaf (e "3")
-                            ])
-                        ]);
-                        Leaf (e "+");
-                        Node (e "F", [
-                            Leaf (e "2")
+                        Node (e "S", [
+                            Node (e "E", [
+                                 Node (e "E", [
+                                     Node (e "F", [
+                                          Leaf (e "3")
+                                    ])
+                                ]);
+                                Leaf (e "*");
+                                Node (e "F", [
+                                    Leaf (e "2")
+                                ])
+                          ] )
                         ])
-                  ] )
-                ])
 
 		let test0 () =
 			let j = JSon.parse ag1 in
