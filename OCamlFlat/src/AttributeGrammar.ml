@@ -211,10 +211,8 @@
               rep.rules
           in
           { rep with variables = newVariables; rules = newRules }
-(* ***************************************************************** *)
 
-
-
+       (* ***************************************************************** *)
        let set_filter pred (s : 'a Set.t) : 'a Set.t =
          Set.fold_left (fun acc x -> if pred x then Set.cons x acc else acc) (Set.make []) s
 
@@ -324,29 +322,77 @@
            | (a, b) :: xs ->
                associ key i xs
 
-        let evaluateOp (op: string) (l: value) (r:value): value =
-            match op with
-                | "+" ->(
-                    match (l, r) with
-                    | Int li, Int ri -> Int (li + ri)
-                    | String ls, String rs -> String (ls ^ rs)
-                    | _ -> failwith "Invalid expression in evaluation"
-                )
-                | "*" -> (
-                    match (l, r) with
-                    | Int li, Int ri -> Int (li * ri)
-                    | _ -> failwith "Invalid expression in evaluation"
-                )
+       let string_of_value = function
+         | Int i -> Printf.sprintf "Int(%d)" i
+         | String s -> Printf.sprintf "String(%S)" s
+         | Bool b -> Printf.sprintf "Bool(%b)" b
 
-                (* acabar isto com os outros valores  -> *)
-                | _ -> failwith "Unknown operator in evaluation"
+       let type_err op l r expected =
+         failwith (Printf.sprintf "Type error: operator %S on %s and %s; expected %s"
+                     op (string_of_value l) (string_of_value r) expected)
+
+       let evaluateOp (op : string) (l : value) (r : value) : value =
+         match op, l, r with
+         (* Parentheses/grouping *)
+         | "(", v, _ -> v
+
+         (* Addition *)
+         | "+", Int a, Int b -> Int (a + b)
+         | "+", String a, String b -> String (a ^ b)
+         | "+", _, _ -> type_err "+" l r "Int+Int or String+String"
+
+         (* Subtraction *)
+         | "-", Int a, Int b -> Int (a - b)
+         | "-", _, _ -> type_err "-" l r "Int-Int"
+
+         (* Multiplication *)
+         | "*", Int a, Int b -> Int (a * b)
+         | "*", _, _ -> type_err "*" l r "Int*Int"
+
+         (* Division *)
+         | "/", Int a, Int b ->
+             if b = 0 then failwith "Division by zero"
+             else Int (a / b)
+         | "/", _, _ -> type_err "/" l r "Int/Int"
+
+         (* Equality *)
+         | "=", Int a, Int b -> Bool (a = b)
+         | "=", String a, String b -> Bool (a = b)
+         | "=", Bool a, Bool b -> Bool (a = b)
+         | "=", _, _ -> type_err "=" l r "same type (Int/String/Bool)"
+
+         (* Inequality *)
+         | "<>", Int a, Int b -> Bool (a <> b)
+         | "<>", String a, String b -> Bool (a <> b)
+         | "<>", Bool a, Bool b -> Bool (a <> b)
+         | "<>", _, _ -> type_err "<>" l r "same type (Int/String/Bool)"
+
+         (* Order comparisons *)
+         | "<",  Int a, Int b -> Bool (a < b)
+         | "<=", Int a, Int b -> Bool (a <= b)
+         | ">",  Int a, Int b -> Bool (a > b)
+         | ">=", Int a, Int b -> Bool (a >= b)
+         | "<",  String a, String b -> Bool (a < b)
+         | "<=", String a, String b -> Bool (a <= b)
+         | ">",  String a, String b -> Bool (a > b)
+         | ">=", String a, String b -> Bool (a >= b)
+
+         (* Disallow Bool ordering *)
+         | ("<" | "<=" | ">" | ">="), Bool _, _
+         | ("<" | "<=" | ">" | ">="), _, Bool _ ->
+             type_err op l r "Int<Int or String<String"
+
+         (* Unknown operator *)
+         | _ ->
+             failwith (Printf.sprintf "Unknown operator or invalid operands: op=%S, left=%s, right=%s"
+                         op (string_of_value l) (string_of_value r))
 
 
        (* Normalize default index: if i = -1 and var = head_sym, use head (0); else keep *)
        let normalize_default_index (head_sym : symbol) (var : symbol) (i : int) : int =
          if i = -1 && var = head_sym then 0 else i
 
-      let is_inherited_eq_for (head_sym : symbol) (eq : equation) : bool =
+       let is_inherited_eq_for (head_sym : symbol) (eq : equation) : bool =
         match eq with
         | (Apply (_attr, (var, i)), _rhs) ->
             (* Normalize: if i = -1 and var = head, treat as i = 0 (head) *)
@@ -394,19 +440,19 @@
 
 
 
-        let rec update a b l =
+       let rec update a b l =
             match l with
             | [] -> [(a, b)]
             | (x, y) :: xs when x = a -> (x, b) :: xs
             | x :: xs -> x :: update a b xs
 
-        let printAllHeadsAndBodies (ag: t): unit =
+       let printAllHeadsAndBodies (ag: t): unit =
           Set.iter (fun r ->
             Printf.printf "Head: %s\n" (symb2str r.head);
             Printf.printf "Body: %s\n" (String.concat ", " (List.map symb2str r.body))
           ) ag.rules
 
-        let rec print_parse_tree pt =
+       let rec print_parse_tree pt =
          match pt with
          | Leaf (symbol, _) ->
              Printf.printf "Leaf: %s\n" (symb2str symbol)
@@ -420,12 +466,11 @@
              ) evals;
              List.iter print_parse_tree children
 
-(******************************************************)
 
-       let getChildren (pt: parseTree): parseTree list =
-                match pt with
-                | Leaf _ -> []
-                | Node (_, children) -> children
+      let getChildren (pt: parseTree): parseTree list =
+        match pt with
+         | Leaf _ -> []
+         | Node (_, children) -> children
 
       let getRootRule (ag: t) (pt: parseTree): AttributeGrammarSupport.rule =
         match pt with
@@ -465,7 +510,6 @@
           (fun acc_nodes eq -> eval head_sym eq acc_nodes)
           nodes
           equations
-
 
       (* Convert Set.t to list deterministically (in insertion-like order) *)
       module SetUtil = struct
@@ -589,12 +633,10 @@
             let new_head_node = List.hd env_final in
             let result = Node (new_head_node, children_done) in
 
-            (* Optional debug *)
             (* Printf.printf "Current parse tree:\n"; *)
             (* print_parse_tree result; *)
 
             result
-
 
       end
 
@@ -643,8 +685,8 @@
                         inherited : ["d"],
                         synthesized : ["v"],
                         initial : "S",
-                        rules : [ "S -> E {v(S) = v(E) ; d(E) = 5}",
-                                  "E -> ~ {v(E) = d(E) + 1}"
+                        rules : [ "S -> E {v(S) = v(E) ; d(E) = 'Funciona '}",
+                                  "E -> ~ {v(E) = d(E) + 'bem!'}"
                                     ]
                             } |}
 
