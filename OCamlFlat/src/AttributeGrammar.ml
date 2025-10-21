@@ -53,7 +53,6 @@
 			let counter = howMany r.body v in
 				counter >= i
 
-
 		let rec validateExp (name: string) (ag: t) (r: rule) (e: expression) : string =
 					  let attr_exists attr =
 					    Set.belongs attr (Set.union ag.synthesized ag.inherited)
@@ -121,8 +120,6 @@
               }
             ) ag.rules
           }
-
-
 
         let cfg_to_ag (cfg: ContextFreeGrammar.t): t =
           {
@@ -211,194 +208,298 @@
               rep.rules
           in
           { rep with variables = newVariables; rules = newRules }
-(* ***************************************************************** *)
 
+        (* Attribute Grammar Support — Combined Logic *)
+        let rec collectFromExpression (exp: expression): attributes =
+          match exp with
+          | Apply (attr, _) -> Set.make [attr]
+          | Expr (_, l, r)  -> Set.union (collectFromExpression l) (collectFromExpression r)
+          | Const _         -> Set.empty
 
+        let collectFromEquation (eq: equation): attributes =
+          let (lhs, rhs) = eq in
+          Set.union (collectFromExpression lhs) (collectFromExpression rhs)
 
-       let set_filter pred (s : 'a Set.t) : 'a Set.t =
-         Set.fold_left (fun acc x -> if pred x then Set.cons x acc else acc) (Set.make []) s
+        let collectFromCondition (cond: condition): attributes =
+          collectFromExpression cond
 
-       (* Split the evaluation environment into (head, children).
-          'nodes' is built as [head :: children] upstream. *)
-       let split_env (nodes: node list) : node * node list =
-         match nodes with
-         | [] -> failwith "split_env: empty nodes"
-         | head :: children -> (head, children)
+        let collectFromRule (r: rule): attributes =
+          let fromEquations  = Set.flat_map collectFromEquation r.equations in
+          let fromConditions = Set.flat_map collectFromCondition r.conditions in
+          Set.union fromEquations fromConditions
 
-       (* Replace or insert an attribute in an eval set, ensuring uniqueness by attr.
-          We avoid Set.filter (in case your Set doesn’t have it) and rebuild via fold. *)
-       let replace_attr (attr: symbol) (value: value) (evs: (symbol * value) Set.t)
-         : (symbol * value) Set.t =
-         let empty = Set.make [] in
-         let without_attr =
-           Set.fold_left
-             (fun acc (a, v) -> if a = attr then acc else Set.cons (a, v) acc)
-             empty
-             evs
-         in
-         Set.cons (attr, value) without_attr
+        let removeUnusedAttributes (rep: t): t =
+          let used           = Set.flat_map collectFromRule rep.rules in
+          let newSynthesized = Set.inter rep.synthesized used in
+          let newInherited   = Set.inter rep.inherited used in
+          { rep with synthesized = newSynthesized; inherited = newInherited }
 
-       (* Find evals for (var, i) with the correct semantics:
-          - i = 0  -> head (must match var)
-          - i = -1 -> first occurrence of 'var' among CHILDREN
-          - i > 0  -> i-th occurrence (1-based) of 'var' among CHILDREN
-       *)
-       let find_evals (var: symbol) (i: int) (nodes: node list) : (symbol * value) Set.t =
-         let (head, children) = split_env nodes in
-         let (head_sym, head_evs) = head in
-         match i with
-         | 0 ->
-             if head_sym = var then head_evs
-             else failwith "find_evals: i=0 refers to head but head symbol != var"
-         | -1 ->
-             let rec first = function
-               | [] -> failwith "find_evals: var not found among children"
-               | (s, evs) :: xs -> if s = var then evs else first xs
-             in
-             first children
-         | k when k > 0 ->
-             let matches = List.filter (fun (s, _) -> s = var) children in
-             if k > List.length matches then
-               failwith "find_evals: var occurrence out of range among children"
-             else
-               let (_, evs) = List.nth matches (k - 1) in
-               evs
-         | _ ->
-             failwith "find_evals: invalid index (use 0 for head, -1 for first child, or positive nth child)"
+        let collectVarsFromRule (r: rule) (vars: variables): variables =
+          Set.inter vars (Set.make r.body)
 
-       (* Update the correct target occurrence on the LHS with (attr := value) *)
-       let update_target (var: symbol) (i: int) (attr: symbol) (value: value) (nodes: node list)
-         : node list =
-         match nodes with
-         | [] -> failwith "update_target: empty nodes"
-         | (head_sym, head_evs) :: children ->
-             let update_child k =
-               let rec aux seen acc xs =
-                 match xs with
-                 | [] -> failwith "update_target: var not found in children"
-                 | ((s, evs) as n) :: tl ->
-                     if s = var then
-                       if seen + 1 = k then
-                         List.rev acc @ ((s, replace_attr attr value evs) :: tl)
-                       else
-                         aux (seen + 1) (n :: acc) tl
-                     else
-                       aux seen (n :: acc) tl
-               in
-               aux 0 [] children
-             in
-             match i with
-             | 0 ->
-                 if head_sym <> var then
-                   failwith "update_target: i=0 targets head, but head symbol != var"
-                 else
-                   (head_sym, replace_attr attr value head_evs) :: children
-             | -1 ->
-                 let children' = update_child 1 in
-                 (head_sym, head_evs) :: children'
-             | k when k > 0 ->
-                 let children' = update_child k in
-                 (head_sym, head_evs) :: children'
-             | _ ->
-                 failwith "update_target: invalid index (use 0 for head, -1 first child, or positive nth child)"
+        let removeUnusedRulesAndVariables (rep: t): t =
+          let build_adj (rules: rule Set.t) =
+            let tbl = Hashtbl.create 97 in
+            Set.iter (fun r ->
+              let xs = try Hashtbl.find tbl r.head with Not_found -> [] in
+              Hashtbl.replace tbl r.head (r.body @ xs)
+            ) rules;
+            tbl
+          in
+          let reachable_from start adj =
+            let rec bfs q visited =
+              match q with
+              | [] -> visited
+              | v :: qs ->
+                  if Set.belongs v visited then bfs qs visited
+                  else
+                    let nbrs = try Hashtbl.find adj v with Not_found -> [] in
+                    bfs (qs @ nbrs) (Set.cons v visited)
+            in
+            bfs [start] (Set.make [])
+          in
+          let adj = build_adj rep.rules in
+          let usedVariables = reachable_from rep.initial adj in
+          let newVariables = Set.filter (fun v -> Set.belongs v usedVariables) rep.variables in
+          let newRules =
+            Set.filter
+              (fun rule ->
+                 Set.belongs rule.head usedVariables &&
+                 List.for_all (fun sym -> Set.belongs sym usedVariables || Set.belongs sym rep.alphabet) rule.body)
+              rep.rules
+          in
+          { rep with variables = newVariables; rules = newRules }
 
+        let split_env (nodes: node list): node * node list =
+          match nodes with
+          | [] -> failwith "split_env: empty nodes"
+          | head :: children -> (head, children)
 
-       let getRoot (pt: parseTree): node =
-                match pt with
-                | Leaf ((s,e)) -> (s,e)
-                | Node ((s,e), _) -> (s,e)
+        let replace_attr (attr: symbol) (value: value) (evs: (symbol * value) Set.t): (symbol * value) Set.t =
+          let without_attr =
+            Set.fold_left (fun acc (a, v) -> if a = attr then acc else Set.cons (a, v) acc) (Set.make []) evs
+          in
+          Set.cons (attr, value) without_attr
 
-       let getRootSymbol (pt: parseTree): symbol =
-            getRoot pt |> fst
+        let find_evals (var: symbol) (i: int) (nodes: node list): (symbol * value) Set.t =
+          let (head, children) = split_env nodes in
+          let (head_sym, head_evs) = head in
+          match i with
+          | 0 ->
+              if head_sym = var then head_evs
+              else failwith "find_evals: i=0 refers to head but head symbol != var"
+          | -1 ->
+              let rec first = function
+                | [] -> failwith "find_evals: var not found among children"
+                | (s, evs) :: xs -> if s = var then evs else first xs
+              in
+              first children
+          | k when k > 0 ->
+              let matches = List.filter (fun (s, _) -> s = var) children in
+              if k > List.length matches then
+                failwith "find_evals: var occurrence out of range among children"
+              else
+                let (_, evs) = List.nth matches (k - 1) in evs
+          | _ ->
+              failwith "find_evals: invalid index"
 
-       let rec associ key i l =
-           Printf.printf "Searching for key: %s, index: %d in list: [%s]\n"
-             (symb2str key) i
-             (String.concat "; " (List.map (fun (a, _) -> symb2str a) l));
-           match l with
-           | [] ->
-               failwith (Printf.sprintf "associ: Key '%s' with index %d not found in the list" (symb2str key) i)
-           | (a, b) :: xs when a = key ->
-               if i = 1 || i = -1 then b
-               else associ key (i - 1) xs
-           | (a, b) :: xs ->
-               associ key i xs
+        let update_target (var: symbol) (i: int) (attr: symbol) (value: value) (nodes: node list): node list =
+          match nodes with
+          | [] -> failwith "update_target: empty nodes"
+          | (head_sym, head_evs) :: children ->
+              let update_child k =
+                let rec aux seen acc xs =
+                  match xs with
+                  | [] -> failwith "update_target: var not found in children"
+                  | ((s, evs) as n) :: tl ->
+                      if s = var then
+                        if seen + 1 = k then List.rev acc @ ((s, replace_attr attr value evs) :: tl)
+                        else aux (seen + 1) (n :: acc) tl
+                      else aux seen (n :: acc) tl
+                in
+                aux 0 [] children
+              in
+              match i with
+              | 0 ->
+                  if head_sym <> var then failwith "update_target: i=0 targets head, but head symbol != var"
+                  else (head_sym, replace_attr attr value head_evs) :: children
+              | -1 -> (head_sym, head_evs) :: update_child 1
+              | k when k > 0 -> (head_sym, head_evs) :: update_child k
+              | _ -> failwith "update_target: invalid index"
 
-        let evaluateOp (op: string) (l: value) (r:value): value =
-            match op with
-                | "+" ->(
-                    match (l, r) with
-                    | Int li, Int ri -> Int (li + ri)
-                    | String ls, String rs -> String (ls ^ rs)
-                    | _ -> failwith "Invalid expression in evaluation"
-                )
-                | "*" -> (
-                    match (l, r) with
-                    | Int li, Int ri -> Int (li * ri)
-                    | _ -> failwith "Invalid expression in evaluation"
-                )
+        let normalize_default_index (head_sym: symbol) (var: symbol) (i: int): int =
+          if i = -1 && var = head_sym then 0 else i
 
-                (* acabar isto com os outros valores  -> *)
-                | _ -> failwith "Unknown operator in evaluation"
+        let is_inherited_eq_for (head_sym: symbol) (eq: equation): bool =
+          match eq with
+          | Apply (_, (var, i)), _ -> normalize_default_index head_sym var i <> 0
+          | _ -> false
 
+        let string_of_value = function
+          | Int i    -> Printf.sprintf "Int(%d)" i
+          | String s -> Printf.sprintf "String(%S)" s
+          | Bool b   -> Printf.sprintf "Bool(%b)" b
 
-       (* Normalize default index: if i = -1 and var = head_sym, use head (0); else keep *)
-       let normalize_default_index (head_sym : symbol) (var : symbol) (i : int) : int =
-         if i = -1 && var = head_sym then 0 else i
+        let type_err op l r expected =
+          failwith (Printf.sprintf "Type error: operator %S on %s and %s; expected %s"
+                      op (string_of_value l) (string_of_value r) expected)
 
-      let is_inherited_eq_for (head_sym : symbol) (eq : equation) : bool =
-        match eq with
-        | (Apply (_attr, (var, i)), _rhs) ->
-            (* Normalize: if i = -1 and var = head, treat as i = 0 (head) *)
-            let i' = normalize_default_index head_sym var i in
-            i' <> 0
-        | _ ->
-            false  (* or fail if you never expect other LHS forms *)
+        let evaluateOp (op: string) (l: value) (r: value): value =
+          match op, l, r with
+          | "(", v, _ -> v
+          | "+", Int a, Int b -> Int (a + b)
+          | "+", String a, String b -> String (a ^ b)
+          | "+", _, _ -> type_err "+" l r "Int+Int or String+String"
+          | "-", Int a, Int b -> Int (a - b)
+          | "-", _, _ -> type_err "-" l r "Int-Int"
+          | "*", Int a, Int b -> Int (a * b)
+          | "*", _, _ -> type_err "*" l r "Int*Int"
+          | "/", Int a, Int b -> if b = 0 then failwith "Division by zero" else Int (a / b)
+          | "/", _, _ -> type_err "/" l r "Int/Int"
+          | "=", Int a, Int b -> Bool (a = b)
+          | "=", String a, String b -> Bool (a = b)
+          | "=", Bool a, Bool b -> Bool (a = b)
+          | "=", _, _ -> type_err "=" l r "same type"
+          | "<>", Int a, Int b -> Bool (a <> b)
+          | "<>", String a, String b -> Bool (a <> b)
+          | "<>", Bool a, Bool b -> Bool (a <> b)
+          | "<>", _, _ -> type_err "<>" l r "same type"
+          | "<", Int a, Int b -> Bool (a < b)
+          | "<=", Int a, Int b -> Bool (a <= b)
+          | ">", Int a, Int b -> Bool (a > b)
+          | ">=", Int a, Int b -> Bool (a >= b)
+          | "<", String a, String b -> Bool (a < b)
+          | "<=", String a, String b -> Bool (a <= b)
+          | ">", String a, String b -> Bool (a > b)
+          | ">=", String a, String b -> Bool (a >= b)
+          | ("<" | "<=" | ">" | ">="), Bool _, _
+          | ("<" | "<=" | ">" | ">="), _, Bool _ -> type_err op l r "Int or String comparison"
+          | _ ->
+              failwith (Printf.sprintf "Unknown operator or invalid operands: op=%S, left=%s, right=%s"
+                          op (string_of_value l) (string_of_value r))
 
-       let rec evaluate (head_sym : symbol) (e: expression) (nodes: node list): value =
-         match e with
-         | Const v -> v
-         | Apply (attr, (var, i)) ->
-             let i' = normalize_default_index head_sym var i in
-             let evals =
-               try find_evals var i' nodes with
-               | Failure msg ->
-                   failwith (Printf.sprintf "evaluate: cannot resolve %s(%s[%d]) – %s"
-                               (symb2str attr) (symb2str var) i' msg)
-             in
-             (try
-                let (_, b) = Set.find (fun (a, _) -> a = attr) evals in
-                b
-              with _ ->
-                failwith (Printf.sprintf "evaluate: attribute '%s' not found on %s[%d]"
-                            (symb2str attr) (symb2str var) i'))
-         | Expr (op, left, right) ->
-             let l = evaluate head_sym left nodes in
-             let r = evaluate head_sym right nodes in
-             evaluateOp op l r
+        let rec evaluate (head_sym: symbol) (e: expression) (nodes: node list): value =
+          match e with
+          | Const v -> v
+          | Apply (attr, (var, i)) ->
+              let i' = normalize_default_index head_sym var i in
+              let evals =
+                try find_evals var i' nodes with
+                | Failure msg ->
+                    failwith (Printf.sprintf "evaluate: cannot resolve %s(%s[%d]) – %s"
+                                (symb2str attr) (symb2str var) i' msg)
+              in
+              (try
+                 let (_, b) = Set.find (fun (a, _) -> a = attr) evals in b
+               with _ ->
+                 failwith (Printf.sprintf "evaluate: attribute '%s' not found on %s[%d]"
+                             (symb2str attr) (symb2str var) i'))
+          | Expr (op, left, right) ->
+              let l = evaluate head_sym left nodes in
+              let r = evaluate head_sym right nodes in
+              evaluateOp op l r
 
-       (* Evaluate an equation and update the node list *)
-       let eval (head_sym : symbol) (e: equation) (nodes: node list): node list =
-         match e with
-         | (Apply (attr, (var, i)), expr) ->
-             let i' = normalize_default_index head_sym var i in
-             let value =
-               try evaluate head_sym expr nodes with
-               | Failure msg ->
-                   failwith (Printf.sprintf "eval %s.%s[%d]: %s"
-                               (symb2str var) (symb2str attr) i' msg)
-             in
-             update_target var i' attr value nodes
-         | _ ->
-             failwith "Invalid equation in evaluation"
+        let eval (head_sym: symbol) (e: equation) (nodes: node list): node list =
+          match e with
+          | Apply (attr, (var, i)), expr ->
+              let i' = normalize_default_index head_sym var i in
+              let value =
+                try evaluate head_sym expr nodes with
+                | Failure msg ->
+                    failwith (Printf.sprintf "eval %s.%s[%d]: %s"
+                                (symb2str var) (symb2str attr) i' msg)
+              in
+              update_target var i' attr value nodes
+          | _ ->
+              failwith "Invalid equation in evaluation"
 
+        let getRoot (pt: parseTree): node =
+          match pt with
+          | Leaf n -> n
+          | Node (n, _) -> n
 
+        let getRootSymbol (pt: parseTree): symbol =
+          getRoot pt |> fst
+        let getChildren (pt: parseTree): parseTree list =
+          match pt with
+          | Leaf _ -> []
+          | Node (_, children) -> children
 
-        let rec update a b l =
-            match l with
-            | [] -> [(a, b)]
-            | (x, y) :: xs when x = a -> (x, b) :: xs
-            | x :: xs -> x :: update a b xs
+        let getRootRule (ag: t) (pt: parseTree): rule =
+          match pt with
+          | Leaf _ -> failwith "getRootRule: leaf has no rule"
+          | Node (_, children) ->
+              let head = getRootSymbol pt in
+              let body = List.map getRootSymbol children in
+              try Set.find (fun r -> r.head = head && r.body = body) ag.rules with
+              | _ ->
+                  let candidates =
+                    ag.rules
+                    |> SetUtil.to_list
+                    |> List.filter (fun r -> r.head = head)
+                    |> List.map (fun r ->
+                         Printf.sprintf "- %s -> %s"
+                           (symb2str r.head)
+                           (String.concat " " (List.map symb2str r.body)))
+                    |> String.concat "\n"
+                  in
+                  failwith (Printf.sprintf
+                    "getRootRule: no rule matches head=%s, body=[%s]\nCandidates with same head:\n%s"
+                    (symb2str head)
+                    (String.concat " " (List.map symb2str body))
+                    (if candidates = "" then "(none)" else candidates))
+
+        let updateRoot (pt: parseTree) (n: node): parseTree =
+          match pt with
+          | Leaf _ -> Leaf n
+          | Node (_, children) -> Node (n, children)
+
+        type target =
+          | Head
+          | Child of symbol * int  (* 1-based occurrence *)
+
+        let target_of_ref (head_sym : symbol) ((var, i) : symbol * int) : target =
+          if i = 0 then Head
+          else if i = -1 then
+            if var = head_sym then Head else Child (var, 1)
+          else if i > 0 then Child (var, i)
+          else failwith "target_of_ref: invalid index"
+
+        let stable_eq_order (head_sym: symbol) (equations: equation Set.t): equation list =
+          let key_of (eq: equation) =
+            match eq with
+            | Apply (attr, (var, i)), _rhs ->
+                begin match target_of_ref head_sym (var, i) with
+                | Head -> (0, "", 0, symb2str attr)
+                | Child (sym, occ) -> (1, symb2str sym, occ, symb2str attr)
+                end
+            | _ -> (2, "", max_int, "")
+          in
+          equations
+          |> SetUtil.to_list
+          |> List.sort (fun a b -> compare (key_of a) (key_of b))
+
+        let apply_equations_at_head
+            (head_sym  : symbol)
+            (nodes     : node list)
+            (equations : equation Set.t)
+          : node list =
+          let () =
+            match nodes with
+            | [] ->
+                failwith "apply_equations_at_head: empty environment (nodes)"
+            | (hs, _) :: _ when hs = head_sym -> ()
+            | (hs, _) :: _ ->
+                failwith
+                  (Printf.sprintf
+                     "apply_equations_at_head: head symbol mismatch (expected %s, got %s)"
+                     (symb2str head_sym) (symb2str hs))
+          in
+          let eqs = stable_eq_order head_sym equations in
+          List.fold_left
+            (fun acc_nodes eq -> eval head_sym eq acc_nodes)
+            nodes
+            eqs
 
         let printAllHeadsAndBodies (ag: t): unit =
           Set.iter (fun r ->
@@ -407,195 +508,142 @@
           ) ag.rules
 
         let rec print_parse_tree pt =
-         match pt with
-         | Leaf (symbol, _) ->
-             Printf.printf "Leaf: %s\n" (symb2str symbol)
-         | Node ((symbol, evals), children) ->
-             Printf.printf "Node: %s\n" (symb2str symbol);
-             Set.iter (fun (attr, value) ->
-               match value with
-               | Int v -> Printf.printf "  Attribute: %s = %d\n" (symb2str attr) v
-               | String s -> Printf.printf "  Attribute: %s = %s\n" (symb2str attr) s
-               | Bool b -> Printf.printf "  Attribute: %s = %b\n" (symb2str attr) b
-             ) evals;
-             List.iter print_parse_tree children
+          match pt with
+          | Leaf (symbol, _) ->
+              Printf.printf "Leaf: %s\n" (symb2str symbol)
+          | Node ((symbol, evals), children) ->
+              Printf.printf "Node: %s\n" (symb2str symbol);
+              Set.iter (fun (attr, value) ->
+                match value with
+                | Int v    -> Printf.printf "  Attribute: %s = %d\n" (symb2str attr) v
+                | String s -> Printf.printf "  Attribute: %s = %s\n" (symb2str attr) s
+                | Bool b   -> Printf.printf "  Attribute: %s = %b\n" (symb2str attr) b
+              ) evals;
+              List.iter print_parse_tree children
 
-(******************************************************)
+        let rec list_update_at n x = function
+          | [] -> failwith "list_update_at: index out of bounds"
+          | _ :: xs when n = 0 -> x :: xs
+          | y :: xs -> y :: list_update_at (n - 1) x xs
 
-       let getChildren (pt: parseTree): parseTree list =
-                match pt with
-                | Leaf _ -> []
-                | Node (_, children) -> children
+        let set_filter (pred : 'a -> bool) (s : 'a Set.t) : 'a Set.t =
+          Set.fold_left (fun acc x -> if pred x then Set.cons x acc else acc) (Set.make []) s
 
-      let getRootRule (ag: t) (pt: parseTree): AttributeGrammarSupport.rule =
-        match pt with
-         | Leaf _ ->
-            failwith "getRootRule"
-         | Node (_, children) ->
-			let head = getRootSymbol pt in
-			let body = List.map getRootSymbol children in
-			try
-               Set.find (fun r -> r.head = head && r.body = body) ag.rules
-            with _ -> failwith (symb2str head)
+        let eq_targets_head (head_sym : symbol) (eq : equation) : bool =
+          match eq with
+          | (Apply (_attr, (var, i)), _rhs) ->
+              begin match target_of_ref head_sym (var, i) with
+              | Head -> true
+              | Child _ -> false
+              end
+          | _ -> false
 
-      let updateRoot a n =
-            match a with
-            | Leaf _ -> Leaf n
-            | Node (_, children) ->
-                   Node (n, children)
+        let eq_targets_child (head_sym : symbol) ((child_sym, k) : symbol * int) (eq : equation) : bool =
+          match eq with
+          | (Apply (_attr, (var, i)), _rhs) ->
+              begin match target_of_ref head_sym (var, i) with
+              | Head -> false
+              | Child (sym, occ) -> sym = child_sym && occ = k
+              end
+          | _ -> false
 
-      let apply_equations_at_head
-          (head_sym : symbol)
-          (nodes    : node list)
-          (equations : equation list)
-        : node list =
-        (* Sanity: env must be [head :: children] and match head_sym *)
-        let () =
-          match nodes with
-          | [] ->
-              failwith "apply_equations_at_head: empty environment (nodes)"
-          | (hs, _) :: _ when hs = head_sym -> ()
-          | (hs, _) :: _ ->
-              failwith
-                (Printf.sprintf
-                   "apply_equations_at_head: head symbol mismatch (expected %s, got %s)"
-                   (symb2str head_sym) (symb2str hs))
-        in
-        List.fold_left
-          (fun acc_nodes eq -> eval head_sym eq acc_nodes)
-          nodes
-          equations
+        let child_occurrences (children : parseTree list) : (symbol * int) list =
+          let rec loop counts acc = function
+            | [] -> List.rev acc
+            | pt :: tl ->
+                let (s, _) = getRoot pt in
+                let seen = try List.assoc s counts with Not_found -> 0 in
+                let k = seen + 1 in
+                let counts' = (s, k) :: List.remove_assoc s counts in
+                loop counts' ((s, k) :: acc) tl
+          in
+          loop [] [] children
 
+        let pick_child_node_by_occ ((sym, k) : symbol * int) (env_tail : node list) : node =
+          let rec aux occ = function
+            | [] ->
+                failwith (Printf.sprintf
+                  "pick_child_node_by_occ: could not find %s[%d] among children in environment"
+                  (symb2str sym) k)
+            | ((s, _) as n) :: tl ->
+                if s = sym then
+                  let occ' = occ + 1 in
+                  if occ' = k then n else aux occ' tl
+                else
+                  aux occ tl
+          in
+          aux 0 env_tail
 
-      (* Convert Set.t to list deterministically (in insertion-like order) *)
-      module SetUtil = struct
-        let to_list s = Set.fold_left (fun acc x -> x :: acc) [] s |> List.rev
-      end
+        let rec zip_update_children (children : parseTree list) (env_tail : node list) : parseTree list =
+          match children, env_tail with
+          | [], [] -> []
+          | c :: cs, e :: es -> updateRoot c e :: zip_update_children cs es
+          | _ ->
+              failwith (Printf.sprintf
+                "zip_update_children: arity mismatch (children=%d, env_tail=%d)"
+                (List.length children) (List.length env_tail))
 
-      (* Update the nth (0-based) element in a list *)
-      let rec list_update_at n x = function
-        | [] -> failwith "list_update_at: index out of bounds"
-        | _ :: xs when n = 0 -> x :: xs
-        | y :: xs -> y :: list_update_at (n - 1) x xs
+        let rec calcAtributes (ag : t) (pt : parseTree) : parseTree =
+          match pt with
+          | Leaf _ ->
+              pt
 
-      (* Count occurrences of a symbol among children up to and including position [pos] (0-based).
-         Returns the 1-based occurrence index of children.(pos) among all children with the same symbol. *)
-      let occurrence_index (child_syms : symbol list) (pos : int) : int =
-        let target = List.nth child_syms pos in
-        let rec loop i cnt =
-          if i > pos then cnt
-          else
-            let s = List.nth child_syms i in
-            let cnt' = if s = target then cnt + 1 else cnt in
-            loop (i + 1) cnt'
-        in
-        loop 0 0
+          | Node (((head_sym, _) as head), children) ->
+              let rule = getRootRule ag (Node (head, children)) in
 
-      (* Decide if an equation’s LHS targets the *head* (synthesized at parent) after normalizing -1 *)
-      let lhs_targets_head (head_sym : symbol) (eq : equation) : bool =
-        match eq with
-        | (Apply (_attr, (var, i)), _rhs) ->
-            let i' = normalize_default_index head_sym var i in
-            i' = 0
-        | _ -> false
+              let children' = eval_children_left_to_right ag head rule.equations children in
 
-      (* Decide if an equation’s LHS targets a specific child at position [pos] (0-based) *)
-      let lhs_targets_child_at
-          (head_sym : symbol)
-          (child_syms : symbol list)
-          (pos : int)
-          (eq : equation)
-        : bool =
-        match eq with
-        | (Apply (_attr, (var, i)), _rhs) ->
-            (* Child position -> which symbol & its occurrence index among peers up to this pos *)
-            let child_sym = List.nth child_syms pos in
-            if var <> child_sym then
-              false
-            else
-              (* Normalize child index: -1 means first occurrence among children *)
-              let target_occ =
-                match i with
-                | -1 -> 1
-                | k when k > 0 -> k
-                | 0 ->
-                    (* i=0 would be the head; not a child *)
-                    false |> ignore; 0
-                | _ -> failwith "lhs_targets_child_at: invalid child index"
-              in
-              if target_occ = 0 then false
-              else
-                let occ_here = occurrence_index child_syms pos in
-                occ_here = target_occ
-        | _ -> false
+              let head_eqs = set_filter (eq_targets_head head_sym) rule.equations in
+              let env2 = head :: List.map getRoot children' in
+              let env3 = apply_equations_at_head head_sym env2 head_eqs in
 
-      let rec calcAtributes (ag: t) (pt: parseTree): parseTree =
-        match pt with
-        | Leaf n ->
-            Leaf n
+              match env3 with
+              | (new_head_sym, new_head_evs) :: child_envs ->
+                  let children'' = zip_update_children children' child_envs in
+                  Node ((new_head_sym, new_head_evs), children'')
+              | [] ->
+                  failwith "calcAtributes: empty environment after synthesized equations"
 
-        | Node (_, _) ->
-            (* 0) Get rule and ordered equations *)
-            let rule = getRootRule ag pt in
-            let equations : equation list = SetUtil.to_list rule.equations in
+        and eval_children_left_to_right
+            (ag       : t)
+            (head     : node)
+            (eqs      : equation Set.t)
+            (children : parseTree list)
+          : parseTree list =
+          let head_sym = fst head in
+          let occs = child_occurrences children in
 
-            let head_sym = getRootSymbol pt in
-            let children0 = getChildren pt in
-            let child_syms = List.map getRootSymbol children0 in
+          let rec loop
+              (processed   : parseTree list)        (* already evaluated children, in reverse order *)
+              (remaining   : parseTree list)        (* children yet to process, in order *)
+              (remaining_o : (symbol * int) list)   (* their (sym,occ) *)
+            : parseTree list =
+            match remaining, remaining_o with
+            | [], [] ->
+                List.rev processed
 
-            (* Build environment [head :: children] as nodes *)
-            let env0 : node list = List.map getRoot (pt :: children0) in
+            | child :: rest, occ :: occs_rest ->
+                let processed_nodes = List.rev processed |> List.map getRoot in
+                let env_before = head :: (processed_nodes @ (List.map getRoot (child :: rest))) in
 
-            (* We will walk children left-to-right, threading env and building new children *)
-            let rec eval_children_left_to_right env acc_children pos =
-              if pos >= List.length children0 then
-                (* All children processed left-to-right *)
-                List.rev acc_children, env
-              else
-                let child_pt = List.nth children0 pos in
+                let inh_eqs = set_filter (eq_targets_child head_sym occ) eqs in
+                let env_after_inh = apply_equations_at_head head_sym env_before inh_eqs in
 
-                (* 1) Apply *inherited* equations that target THIS child position *)
-                let inh_for_child =
-                  List.filter (lhs_targets_child_at head_sym child_syms pos) equations
+                let child_node_after_inh =
+                  match env_after_inh with
+                  | _head_after :: env_tail -> pick_child_node_by_occ occ env_tail
+                  | [] -> failwith "calcAtributes: empty environment after inherited equations"
                 in
-                let env_after_inh = apply_equations_at_head head_sym env inh_for_child in
+                let child_with_inh = updateRoot child child_node_after_inh in
 
-                (* 2) Update this child's root node in its parse tree before recursion *)
-                let child_node_after_inh = List.nth env_after_inh (pos + 1) in
-                let child_pt_inh = updateRoot child_pt child_node_after_inh in
+                let child_evaluated = calcAtributes ag child_with_inh in
 
-                (* 3) Recurse into this child so its synthesized attrs become available *)
-                let child_pt_done = calcAtributes ag child_pt_inh in
+                loop (child_evaluated :: processed) rest occs_rest
 
-                (* 4) Reflect the child's synthesized attrs back into the environment
-                      so the next child (to the right) can depend on them *)
-                let child_node_done = getRoot child_pt_done in
-                let env_after_child =
-                  list_update_at (pos + 1) child_node_done env_after_inh
-                in
-
-                eval_children_left_to_right env_after_child (child_pt_done :: acc_children) (pos + 1)
-            in
-
-            let (children_done, env_after_children) =
-              eval_children_left_to_right env0 [] 0
-            in
-
-            (* 5) Apply *synthesized* equations that target the HEAD (after all children done) *)
-            let syn_for_head = List.filter (lhs_targets_head head_sym) equations in
-            let env_final = apply_equations_at_head head_sym env_after_children syn_for_head in
-
-            (* 6) Rebuild final parse tree: updated head + fully evaluated children *)
-            let new_head_node = List.hd env_final in
-            let result = Node (new_head_node, children_done) in
-
-            (* Optional debug *)
-            (* Printf.printf "Current parse tree:\n"; *)
-            (* print_parse_tree result; *)
-
-            result
-
-
+            | _ ->
+                failwith "calcAtributes: internal error (children/occurrences mismatch)"
+          in
+          loop [] children occs
       end
 
 	module AttributeGrammar =
@@ -637,22 +685,41 @@
         let ag1 = {| {
                         kind : "attribute grammar",
                         description : "",
-                        name : "ag3",
+                        name : "ag1",
                         alphabet : ["[", "]"],
-                        variables : ["S","E"],
-                        inherited : ["d"],
+                        variables : ["S","E","F"],
+                        inherited : [""],
                         synthesized : ["v"],
                         initial : "S",
-                        rules : [ "S -> E {v(S) = v(E) ; d(E) = 5}",
-                                  "E -> ~ {v(E) = d(E) + 1}"
+                        rules : [ "S -> E {v(S) = v(E)}",
+                                    "E -> E * F {v(E0) = v(E1) * v(F)}",
+                                    "E -> F {v(E) = v(F)}",
+                                    "F -> 0 {v(F) = 0}",
+                                    "F -> 1 {v(F) = 1}",
+                                    "F -> 2 {v(F) = 2}",
+                                    "F -> 3 {v(F) = 3}",
+                                    "F -> 4 {v(F) = 4}",
+                                    "F -> 5 {v(F) = 5}",
+                                    "F -> 6 {v(F) = 6}",
+                                    "F -> 7 {v(F) = 7}",
+                                    "F -> 8 {v(F) = 8}",
+                                    "F -> 9 {v(F) = 9}"
                                     ]
-                            } |}
+                        } |}
 
         let pt1 =
                         Node (e "S", [
                             Node (e "E", [
-                              Leaf (e "~")
-                            ])
+                                 Node (e "E", [
+                                     Node (e "F", [
+                                          Leaf (e "3")
+                                    ])
+                                ]);
+                                Leaf (e "*");
+                                Node (e "F", [
+                                    Leaf (e "2")
+                                ])
+                          ] )
                         ])
 
 		let test0 () =
