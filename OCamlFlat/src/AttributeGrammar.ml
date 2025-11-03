@@ -912,27 +912,20 @@
           let ok = accept_ag_with_tree g pt1 in
           Printf.printf "accept_ag_with_tree(pt1) = %b\n" ok
 
-        (* Simple acceptance tests using AG.accept (delegates to CFG.accept via ga_to_cfg) *)
         let test_accept_words () =
-          (* Build your AG *)
           let g = AttributeGrammar.make (Arg.Text ag1) in
 
-          (* Convert AG -> CFG *)
           let cfg : ContextFreeGrammarBasic.t =
             AttributeGrammarPrivate.ga_to_cfg g
           in
-
-          (* Prepare the word 3*2 *)
           let sym = BasicTypes.str2symb in
           let three = sym "3" and star = sym "*" and two = sym "2" in
           let w = [three; star; two] in
 
-          (* Accept using the CFG acceptor *)
           let r = ContextFreeGrammarBasic.accept cfg w in
           Printf.printf "AG->CFG.accept %s = %b (expected: true)\n"
             (BasicTypes.word2str w) r
         ;;
-
 
         let runAll =
           if Util.testing active "AttributeGrammarSupport" then begin
