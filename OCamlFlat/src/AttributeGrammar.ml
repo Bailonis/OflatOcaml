@@ -54,59 +54,102 @@
 				counter >= i
 
 		let rec validateExp (name: string) (ag: t) (r: rule) (e: expression) : string =
-					  let attr_exists attr =
-					    Set.belongs attr (Set.union ag.synthesized ag.inherited)
-					  in
+            let attr_exists attr =
+            Set.belongs attr (Set.union ag.synthesized ag.inherited)
+            in
 
-					  let vars_exists vars =
-					    Set.belongs vars ag.variables
-					  in
+            let vars_exists vars =
+            Set.belongs vars ag.variables
+            in
 
-					  match e with
-					  | Const (Int _) -> "int"
-					  | Const (String _) -> "string"
-					  | Const (Bool _) -> "bool"
-					  | Apply (attr, (var, i)) ->
-					      if attr_exists attr then
-					        if vars_exists var then
-					          if validateAttrArg ag r attr (var, i) then "int"
-					          else Error.error name  "Argumento do Atributo invalido" "error"
-					        else  Error.error name  "Variável não encontrada" "error"
-					      else Error.error name  "Atributo não encontrado" "error"
-					  | Expr (op, l, r_expr) ->
-					      let tl = validateExp name ag r l in
-					      let tr = validateExp name ag r r_expr in
-					      if tl = tr then
-					        match op with
-					        | "+" | "*" ->
-					            if tl <> "string" then tl
-					            else Error.error name "Incompatibilidade de tipos" "error"
-					        | "<" | ">" | "<=" | ">=" | "=" | "<>" ->
-					            if tl = "int" then "bool"
-					            else Error.error name "Incompatibilidade de tipos" "error"
-					        | _ -> Error.error name "Operador desconhecido" "error"
-					      else Error.error name "Incompatibilidade de tipos" "error"
+            match e with
+            | Const (Int _) -> "int"
+            | Const (String _) -> "string"
+            | Const (Bool _) -> "bool"
+            | Apply (attr, (var, i)) ->
+              if attr_exists attr then
+                if vars_exists var then
+                  if validateAttrArg ag r attr (var, i) then "int"
+                  else Error.error name  "Argumento do Atributo invalido" "error"
+                else  Error.error name  "Variável não encontrada" "error"
+              else Error.error name  "Atributo não encontrado" "error"
+            | Expr (op, l, r_expr) ->
+                let tl = validateExp name ag r l in
+                let tr = validateExp name ag r r_expr in
+                if tl <> tr then Error.error name "Incompatibilidade de tipos" "error" else
+                match op, tl with
+                | "(", _ -> tl
+                | "+", "int" -> "int"
+                | "+", "string" -> "string"               (* allow concat *)
+                | "+", _ -> Error.error name "Tipos inválidos para +" "error"
+                | "-", "int" -> "int"
+                | "-", _ -> Error.error name "Tipos inválidos para -" "error"
+                | "*", "int" -> "int"
+                | "*", _ -> Error.error name "Tipos inválidos para *" "error"
+                | "/", "int" -> "int"
+                | "/", _ -> Error.error name "Tipos inválidos para /" "error"
+                | ("=" | "<>"), _ -> "bool"               (* same-type equality already ensured *)
+                | ("<" | "<=" | ">" | ">="), ("int" | "string") -> "bool"
+                | ("<" | "<=" | ">" | ">="), _ -> Error.error name "Tipos inválidos para comparação" "error"
+                | _ -> Error.error name "Operador desconhecido" "error"
 
-		let validateEquation (name: string) (ag: t) ((lhs, rhs): equation) (r: rule): unit =
-		    match lhs with
-		    | Apply _ ->
-		        let lhs_type = validateExp name ag r lhs in
-		        let rhs_type = validateExp name ag r rhs in
-		        if lhs_type = rhs_type && lhs_type <> "erro" then ()
-		        else Error.error name "Incompatibilidade de tipos na equaçao" () (* passar os erros para ingles*)
-		    | _ -> Error.error name "Lado esquerdo da equação deve ser Apply" ()
 
-		    (*fazer vadildação das condições, fazer validar da expr e ver se é booleano*)
-		    (*passo seguinte calcular os atributos utilizando a tree??*)
-		    (*começar com atributos sintetizados*)
+        let normalize_default_index (head_sym: symbol) (var: symbol) (i: int): int =
+                  if i = -1 && var = head_sym then 0 else i
+
+		let occurs_in_body (r: rule) (v: symbol) : int =
+          List.length (List.filter (fun x -> x = v) r.body)
+
+        let is_head_ref (head_sym: symbol) (var,i) =
+          normalize_default_index head_sym var i = 0
+
+        let is_child_ref (head_sym: symbol) (var,i) =
+          not (is_head_ref head_sym (var,i))
+
+        let is_inherited (ag: t) (attr: attribute) = Set.belongs attr ag.inherited
+        let is_synthesized (ag: t) (attr: attribute) = Set.belongs attr ag.synthesized
+
+        let validate_lhs_direction (name:string) (ag:t) (r:rule) (lhs: expression) : unit =
+          match lhs with
+          | Apply (attr, (var, i)) ->
+              let head_sym = r.head in
+              let idx = normalize_default_index head_sym var i in
+              if idx = 0 then begin
+                if not (is_synthesized ag attr) then
+                  Error.error name "LHS to head must be synthesized attribute" ()
+              end else begin
+                if not (is_inherited ag attr) then
+                  Error.error name "LHS to child must be inherited attribute" ()
+              end
+          | _ -> Error.error name "LHS must be Apply (internal)" ()
+
+        let validateEquation (name: string) (ag: t) ((lhs, rhs): equation) (r: rule): unit =
+          match lhs with
+          | Apply (attr, (var, i)) ->
+              let i' = normalize_default_index r.head var i in
+              if i' = 0 then
+                if var <> r.head then
+                  Error.error name "LHS refers head but head symbol mismatch" ()
+              else
+                let c = occurs_in_body r var in
+                if c < i' then
+                  Error.error name "LHS child index out of range" ();
+
+              if not (Set.belongs var ag.variables) then
+                Error.error name "LHS variable is not a grammar variable" ();
+
+              validate_lhs_direction name ag r lhs;
+
+              let lhs_type = validateExp name ag r lhs in
+              let rhs_type = validateExp name ag r rhs in
+              if lhs_type = rhs_type && lhs_type <> "error" then ()
+              else Error.error name "Type mismatch in equation" ()
+          | _ -> Error.error name "LHS of equation must be Apply" ()
+
 
         let validateCondition (name: string) (ag: t) (cond: condition) (rule: rule): unit =
            if validateExp name ag rule cond = "bool" then ()
            else Error.error name "Condição deve ser booleana" ()
-
-
-		let accept (rep: t) (w: word): bool =
-			false
 
         let ag_to_cfg (ag: t): ContextFreeGrammar.t =
           {
@@ -158,117 +201,7 @@
                 validateEquations name rep;
                 validateConditions name rep
 
-        let rec collectFromExpression (exp: expression): attributes =
-          match exp with
-            | Apply (attr, _) -> Set.make [attr]
-            | Expr (_, l, r) -> Set.union (collectFromExpression l) (collectFromExpression r)
-            | _ -> Set.empty
 
-        let collectFromEquation (eq: equation): attributes =
-            let (lhs, rhs) = eq in
-            Set.union (collectFromExpression lhs) (collectFromExpression rhs)
-
-        let collectFromCondition (cond: condition): attributes =
-            collectFromExpression cond
-
-        let collectFromRule (r: rule): attributes =
-            let fromEquations = Set.flat_map collectFromEquation r.equations in
-            let fromConditions = Set.flat_map collectFromCondition r.conditions in
-            Set.union fromEquations fromConditions
-
-        let removeUnusedAttributes (rep: t): t =
-            let used = Set.flat_map collectFromRule rep.rules in
-            let newSynthesized = Set.inter rep.synthesized used in
-            let newInherited = Set.inter rep.inherited used in
-           {
-              rep with
-              synthesized = newSynthesized;
-              inherited = newInherited;
-            }
-
-        let collectVarsFromRule (r: rule) (vars: variables): variables =
-          Set.inter vars (Set.make r.body)
-
-        let removeUnusedRulesAndVariables (rep: t) =
-          let rec collectUsedVariables rules used =
-            match rules with
-            | [] -> used
-            | rule :: rest ->
-                let usedInBody = List.fold_left (fun acc sym -> Set.cons sym acc) used rule.body in
-                collectUsedVariables rest (Set.cons rule.head usedInBody)
-          in
-          let usedVariables = collectUsedVariables (Set.toList rep.rules) (Set.make [rep.initial]) in
-          let newVariables = Set.filter (fun var -> Set.belongs var usedVariables) rep.variables in
-          let newRules =
-            Set.filter
-              (fun rule ->
-                Set.belongs rule.head newVariables &&
-                List.for_all (fun sym -> Set.belongs sym newVariables || Set.belongs sym rep.alphabet) rule.body
-              )
-              rep.rules
-          in
-          { rep with variables = newVariables; rules = newRules }
-
-        (* Attribute Grammar Support — Combined Logic *)
-        let rec collectFromExpression (exp: expression): attributes =
-          match exp with
-          | Apply (attr, _) -> Set.make [attr]
-          | Expr (_, l, r)  -> Set.union (collectFromExpression l) (collectFromExpression r)
-          | Const _         -> Set.empty
-
-        let collectFromEquation (eq: equation): attributes =
-          let (lhs, rhs) = eq in
-          Set.union (collectFromExpression lhs) (collectFromExpression rhs)
-
-        let collectFromCondition (cond: condition): attributes =
-          collectFromExpression cond
-
-        let collectFromRule (r: rule): attributes =
-          let fromEquations  = Set.flat_map collectFromEquation r.equations in
-          let fromConditions = Set.flat_map collectFromCondition r.conditions in
-          Set.union fromEquations fromConditions
-
-        let removeUnusedAttributes (rep: t): t =
-          let used           = Set.flat_map collectFromRule rep.rules in
-          let newSynthesized = Set.inter rep.synthesized used in
-          let newInherited   = Set.inter rep.inherited used in
-          { rep with synthesized = newSynthesized; inherited = newInherited }
-
-        let collectVarsFromRule (r: rule) (vars: variables): variables =
-          Set.inter vars (Set.make r.body)
-
-        let removeUnusedRulesAndVariables (rep: t): t =
-          let build_adj (rules: rule Set.t) =
-            let tbl = Hashtbl.create 97 in
-            Set.iter (fun r ->
-              let xs = try Hashtbl.find tbl r.head with Not_found -> [] in
-              Hashtbl.replace tbl r.head (r.body @ xs)
-            ) rules;
-            tbl
-          in
-          let reachable_from start adj =
-            let rec bfs q visited =
-              match q with
-              | [] -> visited
-              | v :: qs ->
-                  if Set.belongs v visited then bfs qs visited
-                  else
-                    let nbrs = try Hashtbl.find adj v with Not_found -> [] in
-                    bfs (qs @ nbrs) (Set.cons v visited)
-            in
-            bfs [start] (Set.make [])
-          in
-          let adj = build_adj rep.rules in
-          let usedVariables = reachable_from rep.initial adj in
-          let newVariables = Set.filter (fun v -> Set.belongs v usedVariables) rep.variables in
-          let newRules =
-            Set.filter
-              (fun rule ->
-                 Set.belongs rule.head usedVariables &&
-                 List.for_all (fun sym -> Set.belongs sym usedVariables || Set.belongs sym rep.alphabet) rule.body)
-              rep.rules
-          in
-          { rep with variables = newVariables; rules = newRules }
 
         let split_env (nodes: node list): node * node list =
           match nodes with
@@ -327,8 +260,7 @@
               | k when k > 0 -> (head_sym, head_evs) :: update_child k
               | _ -> failwith "update_target: invalid index"
 
-        let normalize_default_index (head_sym: symbol) (var: symbol) (i: int): int =
-          if i = -1 && var = head_sym then 0 else i
+
 
         let is_inherited_eq_for (head_sym: symbol) (eq: equation): bool =
           match eq with
@@ -398,6 +330,24 @@
               let l = evaluate head_sym left nodes in
               let r = evaluate head_sym right nodes in
               evaluateOp op l r
+
+        let as_bool (v: value) : bool =
+                  match v with
+                  | Bool b -> b
+                  | _ -> failwith "Condition must evaluate to Bool"
+
+                let check_conditions_at_node
+                  (head_sym : symbol)
+                  (conds    : condition Set.t)
+                  (env      : node list)
+                  : unit =
+                  Set.iter (fun cond ->
+                    let v = evaluate head_sym cond env in
+                    if not (as_bool v) then
+                      failwith (Printf.sprintf
+                        "Condition failed at node %s"
+                        (symb2str head_sym))
+                  ) conds
 
         let eval (head_sym: symbol) (e: equation) (nodes: node list): node list =
           match e with
@@ -596,6 +546,7 @@
               let head_eqs = set_filter (eq_targets_head head_sym) rule.equations in
               let env2 = head :: List.map getRoot children' in
               let env3 = apply_equations_at_head head_sym env2 head_eqs in
+              check_conditions_at_node head_sym rule.conditions env3;
 
               match env3 with
               | (new_head_sym, new_head_evs) :: child_envs ->
@@ -644,6 +595,120 @@
                 failwith "calcAtributes: internal error (children/occurrences mismatch)"
           in
           loop [] children occs
+
+
+        let is_terminal (ag: t) (s: symbol) = Set.belongs s ag.alphabet
+        let is_variable (ag: t) (s: symbol) = Set.belongs s ag.variables
+
+        let rules_by_head (ag: t) : (symbol, word list) Hashtbl.t =
+          let tbl = Hashtbl.create 97 in
+          Set.iter (fun (r: rule) ->
+            let bodies = try Hashtbl.find tbl r.head with Not_found -> [] in
+            Hashtbl.replace tbl r.head (r.body :: bodies)
+          ) ag.rules;
+          tbl
+
+        let normalize_body (body: word) : word =
+          List.filter (fun s -> s <> epsilon) body
+
+        let is_A_to_a (ag: t) (body: word) : bool =
+          match normalize_body body with
+          | [a] when is_terminal ag a -> true
+          | _ -> false
+
+        let is_A_to_BC (ag: t) (body: word) : bool =
+          match normalize_body body with
+          | [b; c] when is_variable ag b && is_variable ag c -> true
+          | _ -> false
+
+        let bodies_of (tbl: (symbol, word list) Hashtbl.t) (a: symbol) : word list =
+          try Hashtbl.find tbl a with Not_found -> []
+
+        let accept_ag_with_tree (ag: t) (pt: parseTree) : bool =
+          try
+            let _final = calcAtributes ag pt in
+            true
+          with Failure _ -> false
+
+        let is_all_terminals (ag: t) (sf: word) : bool =
+          List.for_all (is_terminal ag) (normalize_body sf)
+
+        let expand_once (ag: t) (sf: word) : word list =
+          let tbl = rules_by_head ag in
+          let rec aux left right =
+            match right with
+            | [] -> []
+            | x::xs ->
+                if is_variable ag x then
+                  let bodies = bodies_of tbl x in
+                  List.map (fun b -> List.rev left @ (normalize_body b) @ xs) bodies
+                else
+                  aux (x::left) xs
+          in
+          aux [] sf
+
+        let generate ?(max_depth=5) ?(max_words=50) (ag: t) : word list =
+          let start = [ag.initial] in
+          let q = Queue.create () in
+          Queue.add (start, 0) q;
+          let acc = ref [] in
+          let seen = Hashtbl.create 10007 in
+          let mark sf =
+            let key = String.concat " " (List.map symb2str sf) in
+            if Hashtbl.mem seen key then true else (Hashtbl.add seen key (); false)
+          in
+          while (not (Queue.is_empty q)) && (List.length !acc < max_words) do
+            let (sf, d) = Queue.take q in
+            if not (mark sf) then begin
+              if is_all_terminals ag sf then
+                acc := sf :: !acc
+              else if d < max_depth then
+                List.iter (fun sf' -> Queue.add (sf', d+1) q) (expand_once ag sf)
+            end
+          done;
+          List.rev !acc
+
+
+        let ga_to_cfg (ag: t): ContextFreeGrammarBasic.t =
+          let rules =
+            let rules_set = ref Set.empty in
+            Set.iter (fun r ->
+              let head_sym = r.head in
+              let body_syms = r.body in
+              let rule = { ContextFreeGrammarBasic.head = head_sym; body = body_syms } in
+              rules_set := Set.add rule !rules_set
+            ) ag.rules;
+            !rules_set
+          in
+          {
+            alphabet = ag.alphabet;
+            variables = ag.variables;
+            initial = ag.initial;
+            rules;
+          }
+
+        let cfg_to_ga (cfg: ContextFreeGrammarBasic.t): t =
+          {
+            alphabet = cfg.alphabet;
+            variables = cfg.variables;
+            synthesized = Set.empty; (* Default value for synthesized attributes *)
+            inherited = Set.empty;   (* Default value for inherited attributes *)
+            initial = cfg.initial;
+            rules = (Set.map (fun (r: ContextFreeGrammarBasic.rule) ->
+              {
+                head = r.head;
+                body = r.body;
+                equations = Set.empty; (* Default value for equations *)
+                conditions = Set.empty; (* Default value for conditions *)
+              }
+            ) cfg.rules : AttributeGrammarSupport.rules); (* Correct placement of type annotation *)
+          }
+
+
+		let accept (ag: t) (w: word): bool =
+          let cfg = ga_to_cfg ag in
+          ContextFreeGrammarBasic.accept cfg w
+
       end
 
 	module AttributeGrammar =
@@ -665,6 +730,9 @@
 		(* Ops *)
 		let stats = Model.stats
 		let accept = accept
+        let accept_ag_with_tree = accept_ag_with_tree
+        let generate ?max_depth ?max_words = generate ?max_depth ?max_words
+
 	end
 
 	module AttributeGrammarTop =
@@ -683,44 +751,25 @@
         let e s = (symb s, Set.empty);;
 
         let ag1 = {| {
-                        kind : "attribute grammar",
-                        description : "",
-                        name : "ag1",
-                        alphabet : ["[", "]"],
-                        variables : ["S","E","F"],
-                        inherited : [""],
-                        synthesized : ["v"],
-                        initial : "S",
-                        rules : [ "S -> E {v(S) = v(E)}",
-                                    "E -> E * F {v(E0) = v(E1) * v(F)}",
-                                    "E -> F {v(E) = v(F)}",
-                                    "F -> 0 {v(F) = 0}",
-                                    "F -> 1 {v(F) = 1}",
-                                    "F -> 2 {v(F) = 2}",
-                                    "F -> 3 {v(F) = 3}",
-                                    "F -> 4 {v(F) = 4}",
-                                    "F -> 5 {v(F) = 5}",
-                                    "F -> 6 {v(F) = 6}",
-                                    "F -> 7 {v(F) = 7}",
-                                    "F -> 8 {v(F) = 8}",
-                                    "F -> 9 {v(F) = 9}"
-                                    ]
-                        } |}
+                kind : "attribute grammar",
+                description : "",
+                name : "ag3",
+                alphabet : ["[", "]"],
+                variables : ["S","E"],
+                inherited : ["d"],
+                synthesized : ["v"],
+                initial : "S",
+                rules : [ "S -> E {v(S) = v(E) ; d(E) = 5}",
+                          "E -> ~ {v(E) = d(E) + 1}"
+                            ]
+                    } |}
 
         let pt1 =
-                        Node (e "S", [
-                            Node (e "E", [
-                                 Node (e "E", [
-                                     Node (e "F", [
-                                          Leaf (e "3")
-                                    ])
-                                ]);
-                                Leaf (e "*");
-                                Node (e "F", [
-                                    Leaf (e "2")
-                                ])
-                          ] )
-                        ])
+                Node (e "S", [
+                    Node (e "E", [
+                      Leaf (e "~")
+                    ])
+                ])
 
 		let test0 () =
 			let j = JSon.parse ag1 in
@@ -734,9 +783,33 @@
 			Printf.printf "Final parse tree:\n";
 			print_parse_tree newTree
 
+        let test_accept_with_tree_ok () =
+          let g = make (Arg.Text ag1) in
+          let ok = accept_ag_with_tree g pt1 in
+          Printf.printf "accept_ag_with_tree(pt1) = %b\n" ok
+
+        let test_accept_words () =
+          let g = AttributeGrammar.make (Arg.Text ag1) in
+
+          let cfg : ContextFreeGrammarBasic.t =
+            AttributeGrammarPrivate.ga_to_cfg g
+          in
+          let sym = BasicTypes.str2symb in
+          let three = sym "3" and star = sym "*" and two = sym "2" in
+          let w = [three; star; two] in
+
+          let r = ContextFreeGrammarBasic.accept cfg w in
+          Printf.printf "AG->CFG.accept %s = %b (expected: true)\n"
+            (BasicTypes.word2str w) r
+        ;;
+
         let runAll =
           if Util.testing active "AttributeGrammarSupport" then begin
             Util.header "test1";
             test1 ();
+
+            Util.header "test_accept_with_tree_ok";
+
+            Util.header "test_accept_words";
           end
 	end
