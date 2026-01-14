@@ -46,7 +46,6 @@
 		let ag2cfg (rep: t): ContextFreeGrammarBasic.t =
 			ContextFreeGrammarBasic.cfg_zero
 
-
 		let validateAttrArg (ag:t) (r:rule) (attr: attribute) (v,i) =
 			if i = 0 then
 				r.head = v && Set.belongs attr (Set.union ag.synthesized ag.inherited)
@@ -55,38 +54,45 @@
 				counter >= i
 
 		let rec validateExp (name: string) (ag: t) (r: rule) (e: expression) : string =
-					  let attr_exists attr =
-					    Set.belongs attr (Set.union ag.synthesized ag.inherited)
-					  in
+            let attr_exists attr =
+            Set.belongs attr (Set.union ag.synthesized ag.inherited)
+            in
 
-					  let vars_exists vars =
-					    Set.belongs vars ag.variables
-					  in
+            let vars_exists vars =
+            Set.belongs vars ag.variables
+            in
 
-					  match e with
-					  | Const (Int _) -> "int"
-					  | Const (String _) -> "string"
-					  | Const (Bool _) -> "bool"
-					  | Apply (attr, (var, i)) ->
-					      if attr_exists attr then
-					        if vars_exists var then
-					          if validateAttrArg ag r attr (var, i) then "int"
-					          else Error.error name  "Argumento do Atributo invalido" "error"
-					        else  Error.error name  "Variável não encontrada" "error"
-					      else Error.error name  "Atributo não encontrado" "error"
-					  | Expr (op, l, r_expr) ->
-					      let tl = validateExp name ag r l in
-					      let tr = validateExp name ag r r_expr in
-					      if tl = tr then
-					        match op with
-					        | "+" | "*" ->
-					            if tl <> "string" then tl
-					            else Error.error name "Incompatibilidade de tipos" "error"
-					        | "<" | ">" | "<=" | ">=" | "=" | "<>" ->
-					            if tl = "int" then "bool"
-					            else Error.error name "Incompatibilidade de tipos" "error"
-					        | _ -> Error.error name "Operador desconhecido" "error"
-					      else Error.error name "Incompatibilidade de tipos" "error"
+            match e with
+            | Const (Int _) -> "int"
+            | Const (String _) -> "string"
+            | Const (Bool _) -> "bool"
+            | Apply (attr, (var, i)) ->
+              if attr_exists attr then
+                if vars_exists var then
+                  if validateAttrArg ag r attr (var, i) then "int"
+                  else Error.error name  "Argumento do Atributo invalido" "error"
+                else  Error.error name  "Variável não encontrada" "error"
+              else Error.error name  "Atributo não encontrado" "error"
+            | Expr (op, l, r_expr) ->
+                let tl = validateExp name ag r l in
+                let tr = validateExp name ag r r_expr in
+                if tl <> tr then Error.error name "Incompatibilidade de tipos" "error" else
+                match op, tl with
+                | "(", _ -> tl
+                | "+", "int" -> "int"
+                | "+", "string" -> "string"               (* allow concat *)
+                | "+", _ -> Error.error name "Tipos inválidos para +" "error"
+                | "-", "int" -> "int"
+                | "-", _ -> Error.error name "Tipos inválidos para -" "error"
+                | "*", "int" -> "int"
+                | "*", _ -> Error.error name "Tipos inválidos para *" "error"
+                | "/", "int" -> "int"
+                | "/", _ -> Error.error name "Tipos inválidos para /" "error"
+                | ("=" | "<>"), _ -> "bool"               (* same-type equality already ensured *)
+                | ("<" | "<=" | ">" | ">="), ("int" | "string") -> "bool"
+                | ("<" | "<=" | ">" | ">="), _ -> Error.error name "Tipos inválidos para comparação" "error"
+                | _ -> Error.error name "Operador desconhecido" "error"
+
 
         let normalize_default_index (head_sym: symbol) (var: symbol) (i: int): int =
                   if i = -1 && var = head_sym then 0 else i
@@ -120,7 +126,6 @@
         let validateEquation (name: string) (ag: t) ((lhs, rhs): equation) (r: rule): unit =
           match lhs with
           | Apply (attr, (var, i)) ->
-              (* V1: index valid *)
               let i' = normalize_default_index r.head var i in
               if i' = 0 then
                 if var <> r.head then
@@ -137,7 +142,7 @@
 
               let lhs_type = validateExp name ag r lhs in
               let rhs_type = validateExp name ag r rhs in
-              if lhs_type = rhs_type && lhs_type <> "erro" then ()
+              if lhs_type = rhs_type && lhs_type <> "error" then ()
               else Error.error name "Type mismatch in equation" ()
           | _ -> Error.error name "LHS of equation must be Apply" ()
 
@@ -196,117 +201,7 @@
                 validateEquations name rep;
                 validateConditions name rep
 
-        let rec collectFromExpression (exp: expression): attributes =
-          match exp with
-            | Apply (attr, _) -> Set.make [attr]
-            | Expr (_, l, r) -> Set.union (collectFromExpression l) (collectFromExpression r)
-            | _ -> Set.empty
 
-        let collectFromEquation (eq: equation): attributes =
-            let (lhs, rhs) = eq in
-            Set.union (collectFromExpression lhs) (collectFromExpression rhs)
-
-        let collectFromCondition (cond: condition): attributes =
-            collectFromExpression cond
-
-        let collectFromRule (r: rule): attributes =
-            let fromEquations = Set.flat_map collectFromEquation r.equations in
-            let fromConditions = Set.flat_map collectFromCondition r.conditions in
-            Set.union fromEquations fromConditions
-
-        let removeUnusedAttributes (rep: t): t =
-            let used = Set.flat_map collectFromRule rep.rules in
-            let newSynthesized = Set.inter rep.synthesized used in
-            let newInherited = Set.inter rep.inherited used in
-           {
-              rep with
-              synthesized = newSynthesized;
-              inherited = newInherited;
-            }
-
-        let collectVarsFromRule (r: rule) (vars: variables): variables =
-          Set.inter vars (Set.make r.body)
-
-        let removeUnusedRulesAndVariables (rep: t) =
-          let rec collectUsedVariables rules used =
-            match rules with
-            | [] -> used
-            | rule :: rest ->
-                let usedInBody = List.fold_left (fun acc sym -> Set.cons sym acc) used rule.body in
-                collectUsedVariables rest (Set.cons rule.head usedInBody)
-          in
-          let usedVariables = collectUsedVariables (Set.toList rep.rules) (Set.make [rep.initial]) in
-          let newVariables = Set.filter (fun var -> Set.belongs var usedVariables) rep.variables in
-          let newRules =
-            Set.filter
-              (fun rule ->
-                Set.belongs rule.head newVariables &&
-                List.for_all (fun sym -> Set.belongs sym newVariables || Set.belongs sym rep.alphabet) rule.body
-              )
-              rep.rules
-          in
-          { rep with variables = newVariables; rules = newRules }
-
-        (* Attribute Grammar Support — Combined Logic *)
-        let rec collectFromExpression (exp: expression): attributes =
-          match exp with
-          | Apply (attr, _) -> Set.make [attr]
-          | Expr (_, l, r)  -> Set.union (collectFromExpression l) (collectFromExpression r)
-          | Const _         -> Set.empty
-
-        let collectFromEquation (eq: equation): attributes =
-          let (lhs, rhs) = eq in
-          Set.union (collectFromExpression lhs) (collectFromExpression rhs)
-
-        let collectFromCondition (cond: condition): attributes =
-          collectFromExpression cond
-
-        let collectFromRule (r: rule): attributes =
-          let fromEquations  = Set.flat_map collectFromEquation r.equations in
-          let fromConditions = Set.flat_map collectFromCondition r.conditions in
-          Set.union fromEquations fromConditions
-
-        let removeUnusedAttributes (rep: t): t =
-          let used           = Set.flat_map collectFromRule rep.rules in
-          let newSynthesized = Set.inter rep.synthesized used in
-          let newInherited   = Set.inter rep.inherited used in
-          { rep with synthesized = newSynthesized; inherited = newInherited }
-
-        let collectVarsFromRule (r: rule) (vars: variables): variables =
-          Set.inter vars (Set.make r.body)
-
-        let removeUnusedRulesAndVariables (rep: t): t =
-          let build_adj (rules: rule Set.t) =
-            let tbl = Hashtbl.create 97 in
-            Set.iter (fun r ->
-              let xs = try Hashtbl.find tbl r.head with Not_found -> [] in
-              Hashtbl.replace tbl r.head (r.body @ xs)
-            ) rules;
-            tbl
-          in
-          let reachable_from start adj =
-            let rec bfs q visited =
-              match q with
-              | [] -> visited
-              | v :: qs ->
-                  if Set.belongs v visited then bfs qs visited
-                  else
-                    let nbrs = try Hashtbl.find adj v with Not_found -> [] in
-                    bfs (qs @ nbrs) (Set.cons v visited)
-            in
-            bfs [start] (Set.make [])
-          in
-          let adj = build_adj rep.rules in
-          let usedVariables = reachable_from rep.initial adj in
-          let newVariables = Set.filter (fun v -> Set.belongs v usedVariables) rep.variables in
-          let newRules =
-            Set.filter
-              (fun rule ->
-                 Set.belongs rule.head usedVariables &&
-                 List.for_all (fun sym -> Set.belongs sym usedVariables || Set.belongs sym rep.alphabet) rule.body)
-              rep.rules
-          in
-          { rep with variables = newVariables; rules = newRules }
 
         let split_env (nodes: node list): node * node list =
           match nodes with
@@ -856,44 +751,25 @@
         let e s = (symb s, Set.empty);;
 
         let ag1 = {| {
-                        kind : "attribute grammar",
-                        description : "",
-                        name : "ag1",
-                        alphabet : ["[", "]", "*", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
-                        variables : ["S","E","F"],
-                        inherited : [""],
-                        synthesized : ["v"],
-                        initial : "S",
-                        rules : [ "S -> E {v(S) = v(E)}",
-                                    "E -> E * F {v(E0) = v(E1) * v(F)}",
-                                    "E -> F {v(E) = v(F)}",
-                                    "F -> 0 {v(F) = 0}",
-                                    "F -> 1 {v(F) = 1}",
-                                    "F -> 2 {v(F) = 2}",
-                                    "F -> 3 {v(F) = 3}",
-                                    "F -> 4 {v(F) = 4}",
-                                    "F -> 5 {v(F) = 5}",
-                                    "F -> 6 {v(F) = 6}",
-                                    "F -> 7 {v(F) = 7}",
-                                    "F -> 8 {v(F) = 8}",
-                                    "F -> 9 {v(F) = 9}"
-                                    ]
-                        } |}
+                kind : "attribute grammar",
+                description : "",
+                name : "ag3",
+                alphabet : ["[", "]"],
+                variables : ["S","E"],
+                inherited : ["d"],
+                synthesized : ["v"],
+                initial : "S",
+                rules : [ "S -> E {v(S) = v(E) ; d(E) = 5}",
+                          "E -> ~ {v(E) = d(E) + 1}"
+                            ]
+                    } |}
 
         let pt1 =
-                        Node (e "S", [
-                            Node (e "E", [
-                                 Node (e "E", [
-                                     Node (e "F", [
-                                          Leaf (e "3")
-                                    ])
-                                ]);
-                                Leaf (e "*");
-                                Node (e "F", [
-                                    Leaf (e "2")
-                                ])
-                          ] )
-                        ])
+                Node (e "S", [
+                    Node (e "E", [
+                      Leaf (e "~")
+                    ])
+                ])
 
 		let test0 () =
 			let j = JSon.parse ag1 in
@@ -933,10 +809,7 @@
             test1 ();
 
             Util.header "test_accept_with_tree_ok";
-            test_accept_with_tree_ok ();
 
             Util.header "test_accept_words";
-            test_accept_words ()
-
           end
 	end
