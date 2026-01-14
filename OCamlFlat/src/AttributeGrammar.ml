@@ -764,7 +764,6 @@
                             ]
                     } |}
 
-
         let pt1 =
                 Node (e "S", [
                     Node (e "E", [
