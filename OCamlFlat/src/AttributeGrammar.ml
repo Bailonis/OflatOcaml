@@ -488,7 +488,7 @@
                 "zip_update_children: arity mismatch (children=%d, env_tail=%d)"
                 (List.length children) (List.length env_tail))
 
-        let rec calcAtributes (ag : t) (pt : parseTree) : parseTree =
+        let rec calcAttributes (ag : t) (pt : parseTree) : parseTree =
           match pt with
           | Leaf _ ->
               pt
@@ -508,7 +508,7 @@
                   let children'' = zip_update_children children' child_envs in
                   Node ((new_head_sym, new_head_evs), children'')
               | [] ->
-                  failwith "calcAtributes: empty environment after synthesized equations"
+                  failwith "calcAttributes: empty environment after synthesized equations"
 
         and eval_children_left_to_right
             (ag       : t)
@@ -538,16 +538,16 @@
                 let child_node_after_inh =
                   match env_after_inh with
                   | _head_after :: env_tail -> pick_child_node_by_occ occ env_tail
-                  | [] -> failwith "calcAtributes: empty environment after inherited equations"
+                  | [] -> failwith "calcAttributes: empty environment after inherited equations"
                 in
                 let child_with_inh = updateRoot child child_node_after_inh in
 
-                let child_evaluated = calcAtributes ag child_with_inh in
+                let child_evaluated = calcAttributes ag child_with_inh in
 
                 loop (child_evaluated :: processed) rest occs_rest
 
             | _ ->
-                failwith "calcAtributes: internal error (children/occurrences mismatch)"
+                failwith "calcAttributes: internal error (children/occurrences mismatch)"
           in
           loop [] children occs
 
@@ -581,7 +581,7 @@
 
         let accept_ag_with_tree (ag: t) (pt: parseTree) : bool =
           try
-            let _final = calcAtributes ag pt in
+            let _final = calcAttributes ag pt in
             true
           with Failure _ -> false
 
@@ -714,23 +714,49 @@
         let ag1 = {| {
                         kind : "attribute grammar",
                         description : "",
-                        name : "ag3",
-                        alphabet : [""],
-                        variables : ["S","E"],
-                        inherited : ["d"],
+                        name : "ag1",
+                        alphabet : ["0","1","2","3","4","5","6","7","8","9","+"],
+                        variables : ["S","E","F"],
+                        inherited : [""],
                         synthesized : ["v"],
                         initial : "S",
-                        rules : [ "S -> E {v(S) = v(E) ; d(E) = 5}",
-                                  "E -> ~ {v(E) = d(E) + 1}"
+                        rules : [ "S -> E {v(S) = v(E)}",
+                                    "E -> E + F {v(E0) = v(E1) + v(F)}",
+                                    "E -> F {v(E) = v(F)}",
+                                    "F -> 0 {v(F) = 0}",
+                                    "F -> 1 {v(F) = 1}",
+                                    "F -> 2 {v(F) = 2}",
+                                    "F -> 3 {v(F) = 3}",
+                                    "F -> 4 {v(F) = 4}",
+                                    "F -> 5 {v(F) = 5}",
+                                    "F -> 6 {v(F) = 6}",
+                                    "F -> 7 {v(F) = 7}",
+                                    "F -> 8 {v(F) = 8}",
+                                    "F -> 9 {v(F) = 9}"
                                     ]
-                            } |}
+                        } |}
 
         let pt1 =
                         Node (e "S", [
                             Node (e "E", [
-                              Leaf (e "~")
-                            ])
+                                 Node (e "E", [
+                                     Node (e "F", [
+                                          Leaf (e "3")
+                                    ])
+                                ]);
+                                Leaf (e "+");
+                                Node (e "F", [
+                                    Leaf (e "2")
+                                ])
+                          ] )
                         ])
+
+        let pt3 =
+               Node (e "S", [
+                   Node (e "E", [
+                     Leaf (e "~")
+                   ])
+               ])
 
 		let test0 () =
 			let j = JSon.parse ag1 in
@@ -740,13 +766,13 @@
 
 		let test1 () =
 			let g = make (Arg.Text ag1) in
-			let newTree = calcAtributes g pt1 in
+			let newTree = calcAttributes g pt1 in
 			Printf.printf "Final parse tree:\n";
 			print_parse_tree newTree
 
         let test_accept_with_tree_ok () =
           let g = make (Arg.Text ag1) in
-          let ok = accept_ag_with_tree g pt1 in
+          let ok = accept_ag_with_tree g pt3 in
           Printf.printf "accept_ag_with_tree(pt1) = %b\n" ok
 
         let test_accept_words () =
@@ -756,12 +782,22 @@
             AttributeGrammarPrivate.ga_to_cfg g
           in
           let sym = BasicTypes.str2symb in
-          let three = sym "3" and star = sym "*" and two = sym "2" in
+          let three = sym "3" and star = sym "+" and two = sym "2" in
           let w = [three; star; two] in
 
           let r = ContextFreeGrammarBasic.accept cfg w in
           Printf.printf "AG->CFG.accept %s = %b (expected: true)\n"
             (BasicTypes.word2str w) r
+
+        let generate_words () =
+          let g = AttributeGrammar.make (Arg.Text ag1) in
+          let words = AttributeGrammar.generate ~max_depth:5 ~max_words:100 g in
+          Printf.printf "generate: produced %d words (max_depth=5, max_words=10)\n"
+            (List.length words);
+          (* Pretty-print the results *)
+          List.iter
+            (fun w -> Printf.printf "  %s\n" (BasicTypes.word2str w))
+            words
         ;;
 
         let runAll =
@@ -770,7 +806,9 @@
             test1 ();
 
             Util.header "test_accept_with_tree_ok";
+            (*test_accept_with_tree_ok ();*)
 
-            Util.header "test_accept_words";
+            Util.header "test_generate_words";
+            (*generate_words ();*)
           end
 	end
