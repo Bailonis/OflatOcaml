@@ -43,9 +43,6 @@
 		let howMany (body: word) (v: variable) =
 			List.length (List.filter (fun x-> x = v) body)
 
-		let ag2cfg (rep: t): ContextFreeGrammarBasic.t =
-			ContextFreeGrammarBasic.cfg_zero
-
 		let validateAttrArg (ag:t) (r:rule) (attr: attribute) (v,i) =
 			if i = 0 then
 				r.head = v && Set.belongs attr (Set.union ag.synthesized ag.inherited)
@@ -151,36 +148,6 @@
            if validateExp name ag rule cond = "bool" then ()
            else Error.error name "Condição deve ser booleana" ()
 
-        let ag_to_cfg (ag: t): ContextFreeGrammar.t =
-          {
-            alphabet = ag.alphabet;
-            variables = ag.variables;
-            initial = ag.initial;
-            rules = Set.map (fun r ->
-              {
-                ContextFreeGrammar.head = r.head;
-                body = r.body
-              }
-            ) ag.rules
-          }
-
-        let cfg_to_ag (cfg: ContextFreeGrammar.t): t =
-          {
-            alphabet = cfg.alphabet;
-            variables = cfg.variables;
-            synthesized = Set.empty;
-            inherited = Set.empty;
-            initial = cfg.initial;
-            rules = Set.map (fun (r: ContextFreeGrammar.rule) ->
-              {
-                head = r.head;
-                body = r.body;
-                equations = Set.empty;
-                conditions = Set.empty
-              }
-            ) cfg.rules
-          }
-
         let validateEquations (name: string) (rep: t): unit =
             Set.iter (fun r ->
                 Set.iter (fun eq ->
@@ -194,14 +161,6 @@
                     validateCondition name rep eq r
                 ) r.conditions
             ) rep.rules
-
-        let validate (name: string) (rep: t): unit =
-            let cfg = ag2cfg rep in
-                ContextFreeGrammarPrivate.validate name cfg;
-                validateEquations name rep;
-                validateConditions name rep
-
-
 
         let split_env (nodes: node list): node * node list =
           match nodes with
@@ -268,47 +227,47 @@
           | _ -> false
 
         let string_of_value = function
-          | Int i    -> Printf.sprintf "Int(%d)" i
-          | String s -> Printf.sprintf "String(%S)" s
-          | Bool b   -> Printf.sprintf "Bool(%b)" b
+            | Int i    -> Printf.sprintf "Int(%d)" i
+            | String s -> Printf.sprintf "String(%S)" s
+            | Bool b   -> Printf.sprintf "Bool(%b)" b
 
         let type_err op l r expected =
           failwith (Printf.sprintf "Type error: operator %S on %s and %s; expected %s"
                       op (string_of_value l) (string_of_value r) expected)
 
-        let evaluateOp (op: string) (l: value) (r: value): value =
-          match op, l, r with
-          | "(", v, _ -> v
-          | "+", Int a, Int b -> Int (a + b)
-          | "+", String a, String b -> String (a ^ b)
-          | "+", _, _ -> type_err "+" l r "Int+Int or String+String"
-          | "-", Int a, Int b -> Int (a - b)
-          | "-", _, _ -> type_err "-" l r "Int-Int"
-          | "*", Int a, Int b -> Int (a * b)
-          | "*", _, _ -> type_err "*" l r "Int*Int"
-          | "/", Int a, Int b -> if b = 0 then failwith "Division by zero" else Int (a / b)
-          | "/", _, _ -> type_err "/" l r "Int/Int"
-          | "=", Int a, Int b -> Bool (a = b)
-          | "=", String a, String b -> Bool (a = b)
-          | "=", Bool a, Bool b -> Bool (a = b)
-          | "=", _, _ -> type_err "=" l r "same type"
-          | "<>", Int a, Int b -> Bool (a <> b)
-          | "<>", String a, String b -> Bool (a <> b)
-          | "<>", Bool a, Bool b -> Bool (a <> b)
-          | "<>", _, _ -> type_err "<>" l r "same type"
-          | "<", Int a, Int b -> Bool (a < b)
-          | "<=", Int a, Int b -> Bool (a <= b)
-          | ">", Int a, Int b -> Bool (a > b)
-          | ">=", Int a, Int b -> Bool (a >= b)
-          | "<", String a, String b -> Bool (a < b)
-          | "<=", String a, String b -> Bool (a <= b)
-          | ">", String a, String b -> Bool (a > b)
-          | ">=", String a, String b -> Bool (a >= b)
-          | ("<" | "<=" | ">" | ">="), Bool _, _
-          | ("<" | "<=" | ">" | ">="), _, Bool _ -> type_err op l r "Int or String comparison"
-          | _ ->
-              failwith (Printf.sprintf "Unknown operator or invalid operands: op=%S, left=%s, right=%s"
-                          op (string_of_value l) (string_of_value r))
+    let evaluateOp (op: string) (l: value) (r: value): value =
+        match op, l, r with
+        | "(", v, _ -> v
+        | "+", Int a, Int b -> Int (a + b)
+        | "+", String a, String b -> String (a ^ b)
+        | "+", _, _ -> type_err "+" l r "Int+Int or String+String"
+        | "-", Int a, Int b -> Int (a - b)
+        | "-", _, _ -> type_err "-" l r "Int-Int"
+        | "*", Int a, Int b -> Int (a * b)
+        | "*", _, _ -> type_err "*" l r "Int*Int"
+        | "/", Int a, Int b -> if b = 0 then failwith "Division by zero" else Int (a / b)
+        | "/", _, _ -> type_err "/" l r "Int/Int"
+        | "=",  Int a,    Int b    -> Bool (a = b)
+        | "=",  String a, String b -> Bool (a = b)
+        | "=",  Bool a,   Bool b   -> Bool (a = b)
+        | "=",  _, _ -> type_err "=" l r "same type"
+        | "<>", Int a,    Int b    -> Bool (a <> b)
+        | "<>", String a, String b -> Bool (a <> b)
+        | "<>", Bool a,   Bool b   -> Bool (a <> b)
+        | "<>", _, _ -> type_err "<>" l r "same type"
+        | "<",  Int a,    Int b -> Bool (a <  b)
+        | "<=", Int a,    Int b -> Bool (a <= b)
+        | ">",  Int a,    Int b -> Bool (a >  b)
+        | ">=", Int a,    Int b -> Bool (a >= b)
+        | "<",  String a, String b -> Bool (a <  b)
+        | "<=", String a, String b -> Bool (a <= b)
+        | ">",  String a, String b -> Bool (a >  b)
+        | ">=", String a, String b -> Bool (a >= b)
+        | ("<" | "<=" | ">" | ">="), Bool _, _
+        | ("<" | "<=" | ">" | ">="), _, Bool _ -> type_err op l r "Int or String comparison"
+        | _ ->
+        failwith (Printf.sprintf "Unknown operator or invalid operands: op=%S, left=%s, right=%s"
+                 op (string_of_value l) (string_of_value r))
 
         let rec evaluate (head_sym: symbol) (e: expression) (nodes: node list): value =
           match e with
@@ -704,6 +663,12 @@
             ) cfg.rules : AttributeGrammarSupport.rules); (* Correct placement of type annotation *)
           }
 
+          let validate (name: string) (rep: t): unit =
+                      let cfg = ga_to_cfg rep in
+                          ContextFreeGrammarPrivate.validate name cfg;
+                          validateEquations name rep;
+                          validateConditions name rep
+
 
 		let accept (ag: t) (w: word): bool =
           let cfg = ga_to_cfg ag in
@@ -753,22 +718,41 @@
         let ag1 = {| {
                 kind : "attribute grammar",
                 description : "",
-                name : "ag3",
-                alphabet : ["[", "]"],
-                variables : ["S","E"],
-                inherited : ["d"],
+                name : "ag1",
+                alphabet : ["0","1","2","3","4","5","6","7","8","9","*"],
+                variables : ["S","E","F"],
+                inherited : [""],
                 synthesized : ["v"],
                 initial : "S",
-                rules : [ "S -> E {v(S) = v(E) ; d(E) = 5}",
-                          "E -> ~ {v(E) = d(E) + 1}"
+                rules : [ "S -> E {v(S) = v(E)}",
+                            "E -> E * F {v(E0) = v(E1) * v(F)}",
+                            "E -> F {v(E) = v(F)}",
+                            "F -> 0 {v(F) = 0}",
+                            "F -> 1 {v(F) = 1}",
+                            "F -> 2 {v(F) = 2}",
+                            "F -> 3 {v(F) = 3}",
+                            "F -> 4 {v(F) = 4}",
+                            "F -> 5 {v(F) = 5}",
+                            "F -> 6 {v(F) = 6}",
+                            "F -> 7 {v(F) = 7}",
+                            "F -> 8 {v(F) = 8}",
+                            "F -> 9 {v(F) = 9}"
                             ]
-                    } |}
+                } |}
 
         let pt1 =
                 Node (e "S", [
                     Node (e "E", [
-                      Leaf (e "~")
-                    ])
+                         Node (e "E", [
+                             Node (e "F", [
+                                  Leaf (e "3")
+                            ])
+                        ]);
+                        Leaf (e "*");
+                        Node (e "F", [
+                            Leaf (e "2")
+                        ])
+                  ] )
                 ])
 
 		let test0 () =
