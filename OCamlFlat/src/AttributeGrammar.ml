@@ -43,9 +43,6 @@
 		let howMany (body: word) (v: variable) =
 			List.length (List.filter (fun x-> x = v) body)
 
-		let ag2cfg (rep: t): ContextFreeGrammarBasic.t =
-			ContextFreeGrammarBasic.cfg_zero
-
 		let validateAttrArg (ag:t) (r:rule) (attr: attribute) (v,i) =
 			if i = 0 then
 				r.head = v && Set.belongs attr (Set.union ag.synthesized ag.inherited)
@@ -127,59 +124,25 @@
           match lhs with
           | Apply (attr, (var, i)) ->
               let i' = normalize_default_index r.head var i in
-              if i' = 0 then
-                if var <> r.head then
-                  Error.error name "LHS refers head but head symbol mismatch" ()
-              else
+              if i' = 0 then (
+                if var <> r.head then Error.error name "LHS refers head but head symbol mismatch" ()
+              ) else (
                 let c = occurs_in_body r var in
-                if c < i' then
-                  Error.error name "LHS child index out of range" ();
-
+                if c < i' then Error.error name "LHS child index out of range" ()
+              );
               if not (Set.belongs var ag.variables) then
                 Error.error name "LHS variable is not a grammar variable" ();
-
               validate_lhs_direction name ag r lhs;
-
-              let lhs_type = validateExp name ag r lhs in
-              let rhs_type = validateExp name ag r rhs in
-              if lhs_type = rhs_type && lhs_type <> "error" then ()
-              else Error.error name "Type mismatch in equation" ()
-          | _ -> Error.error name "LHS of equation must be Apply" ()
-
+              let lt = validateExp name ag r lhs in
+              let rt = validateExp name ag r rhs in
+              if lt = rt && lt <> "error" then () else
+                Error.error name "Type mismatch in equation" ()
+          | _ ->
+              Error.error name "LHS of equation must be Apply" ()
 
         let validateCondition (name: string) (ag: t) (cond: condition) (rule: rule): unit =
            if validateExp name ag rule cond = "bool" then ()
            else Error.error name "Condição deve ser booleana" ()
-
-        let ag_to_cfg (ag: t): ContextFreeGrammar.t =
-          {
-            alphabet = ag.alphabet;
-            variables = ag.variables;
-            initial = ag.initial;
-            rules = Set.map (fun r ->
-              {
-                ContextFreeGrammar.head = r.head;
-                body = r.body
-              }
-            ) ag.rules
-          }
-
-        let cfg_to_ag (cfg: ContextFreeGrammar.t): t =
-          {
-            alphabet = cfg.alphabet;
-            variables = cfg.variables;
-            synthesized = Set.empty;
-            inherited = Set.empty;
-            initial = cfg.initial;
-            rules = Set.map (fun (r: ContextFreeGrammar.rule) ->
-              {
-                head = r.head;
-                body = r.body;
-                equations = Set.empty;
-                conditions = Set.empty
-              }
-            ) cfg.rules
-          }
 
         let validateEquations (name: string) (rep: t): unit =
             Set.iter (fun r ->
@@ -194,14 +157,6 @@
                     validateCondition name rep eq r
                 ) r.conditions
             ) rep.rules
-
-        let validate (name: string) (rep: t): unit =
-            let cfg = ag2cfg rep in
-                ContextFreeGrammarPrivate.validate name cfg;
-                validateEquations name rep;
-                validateConditions name rep
-
-
 
         let split_env (nodes: node list): node * node list =
           match nodes with
@@ -268,47 +223,47 @@
           | _ -> false
 
         let string_of_value = function
-          | Int i    -> Printf.sprintf "Int(%d)" i
-          | String s -> Printf.sprintf "String(%S)" s
-          | Bool b   -> Printf.sprintf "Bool(%b)" b
+            | Int i    -> Printf.sprintf "Int(%d)" i
+            | String s -> Printf.sprintf "String(%S)" s
+            | Bool b   -> Printf.sprintf "Bool(%b)" b
 
         let type_err op l r expected =
           failwith (Printf.sprintf "Type error: operator %S on %s and %s; expected %s"
                       op (string_of_value l) (string_of_value r) expected)
 
-        let evaluateOp (op: string) (l: value) (r: value): value =
-          match op, l, r with
-          | "(", v, _ -> v
-          | "+", Int a, Int b -> Int (a + b)
-          | "+", String a, String b -> String (a ^ b)
-          | "+", _, _ -> type_err "+" l r "Int+Int or String+String"
-          | "-", Int a, Int b -> Int (a - b)
-          | "-", _, _ -> type_err "-" l r "Int-Int"
-          | "*", Int a, Int b -> Int (a * b)
-          | "*", _, _ -> type_err "*" l r "Int*Int"
-          | "/", Int a, Int b -> if b = 0 then failwith "Division by zero" else Int (a / b)
-          | "/", _, _ -> type_err "/" l r "Int/Int"
-          | "=", Int a, Int b -> Bool (a = b)
-          | "=", String a, String b -> Bool (a = b)
-          | "=", Bool a, Bool b -> Bool (a = b)
-          | "=", _, _ -> type_err "=" l r "same type"
-          | "<>", Int a, Int b -> Bool (a <> b)
-          | "<>", String a, String b -> Bool (a <> b)
-          | "<>", Bool a, Bool b -> Bool (a <> b)
-          | "<>", _, _ -> type_err "<>" l r "same type"
-          | "<", Int a, Int b -> Bool (a < b)
-          | "<=", Int a, Int b -> Bool (a <= b)
-          | ">", Int a, Int b -> Bool (a > b)
-          | ">=", Int a, Int b -> Bool (a >= b)
-          | "<", String a, String b -> Bool (a < b)
-          | "<=", String a, String b -> Bool (a <= b)
-          | ">", String a, String b -> Bool (a > b)
-          | ">=", String a, String b -> Bool (a >= b)
-          | ("<" | "<=" | ">" | ">="), Bool _, _
-          | ("<" | "<=" | ">" | ">="), _, Bool _ -> type_err op l r "Int or String comparison"
-          | _ ->
-              failwith (Printf.sprintf "Unknown operator or invalid operands: op=%S, left=%s, right=%s"
-                          op (string_of_value l) (string_of_value r))
+    let evaluateOp (op: string) (l: value) (r: value): value =
+        match op, l, r with
+        | "(", v, _ -> v
+        | "+", Int a, Int b -> Int (a + b)
+        | "+", String a, String b -> String (a ^ b)
+        | "+", _, _ -> type_err "+" l r "Int+Int or String+String"
+        | "-", Int a, Int b -> Int (a - b)
+        | "-", _, _ -> type_err "-" l r "Int-Int"
+        | "*", Int a, Int b -> Int (a * b)
+        | "*", _, _ -> type_err "*" l r "Int*Int"
+        | "/", Int a, Int b -> if b = 0 then failwith "Division by zero" else Int (a / b)
+        | "/", _, _ -> type_err "/" l r "Int/Int"
+        | "=",  Int a,    Int b    -> Bool (a = b)
+        | "=",  String a, String b -> Bool (a = b)
+        | "=",  Bool a,   Bool b   -> Bool (a = b)
+        | "=",  _, _ -> type_err "=" l r "same type"
+        | "<>", Int a,    Int b    -> Bool (a <> b)
+        | "<>", String a, String b -> Bool (a <> b)
+        | "<>", Bool a,   Bool b   -> Bool (a <> b)
+        | "<>", _, _ -> type_err "<>" l r "same type"
+        | "<",  Int a,    Int b -> Bool (a <  b)
+        | "<=", Int a,    Int b -> Bool (a <= b)
+        | ">",  Int a,    Int b -> Bool (a >  b)
+        | ">=", Int a,    Int b -> Bool (a >= b)
+        | "<",  String a, String b -> Bool (a <  b)
+        | "<=", String a, String b -> Bool (a <= b)
+        | ">",  String a, String b -> Bool (a >  b)
+        | ">=", String a, String b -> Bool (a >= b)
+        | ("<" | "<=" | ">" | ">="), Bool _, _
+        | ("<" | "<=" | ">" | ">="), _, Bool _ -> type_err op l r "Int or String comparison"
+        | _ ->
+        failwith (Printf.sprintf "Unknown operator or invalid operands: op=%S, left=%s, right=%s"
+                 op (string_of_value l) (string_of_value r))
 
         let rec evaluate (head_sym: symbol) (e: expression) (nodes: node list): value =
           match e with
@@ -533,7 +488,7 @@
                 "zip_update_children: arity mismatch (children=%d, env_tail=%d)"
                 (List.length children) (List.length env_tail))
 
-        let rec calcAtributes (ag : t) (pt : parseTree) : parseTree =
+        let rec calcAttributes (ag : t) (pt : parseTree) : parseTree =
           match pt with
           | Leaf _ ->
               pt
@@ -553,7 +508,7 @@
                   let children'' = zip_update_children children' child_envs in
                   Node ((new_head_sym, new_head_evs), children'')
               | [] ->
-                  failwith "calcAtributes: empty environment after synthesized equations"
+                  failwith "calcAttributes: empty environment after synthesized equations"
 
         and eval_children_left_to_right
             (ag       : t)
@@ -583,16 +538,16 @@
                 let child_node_after_inh =
                   match env_after_inh with
                   | _head_after :: env_tail -> pick_child_node_by_occ occ env_tail
-                  | [] -> failwith "calcAtributes: empty environment after inherited equations"
+                  | [] -> failwith "calcAttributes: empty environment after inherited equations"
                 in
                 let child_with_inh = updateRoot child child_node_after_inh in
 
-                let child_evaluated = calcAtributes ag child_with_inh in
+                let child_evaluated = calcAttributes ag child_with_inh in
 
                 loop (child_evaluated :: processed) rest occs_rest
 
             | _ ->
-                failwith "calcAtributes: internal error (children/occurrences mismatch)"
+                failwith "calcAttributes: internal error (children/occurrences mismatch)"
           in
           loop [] children occs
 
@@ -626,7 +581,7 @@
 
         let accept_ag_with_tree (ag: t) (pt: parseTree) : bool =
           try
-            let _final = calcAtributes ag pt in
+            let _final = calcAttributes ag pt in
             true
           with Failure _ -> false
 
@@ -704,10 +659,138 @@
             ) cfg.rules : AttributeGrammarSupport.rules); (* Correct placement of type annotation *)
           }
 
+         let validate (name: string) (rep: t): unit =
+                   let cfg = ga_to_cfg rep in
+                   ContextFreeGrammarPrivate.validate name cfg;
+                   validateEquations name rep;
+                   validateConditions name rep
 
 		let accept (ag: t) (w: word): bool =
           let cfg = ga_to_cfg ag in
           ContextFreeGrammarBasic.accept cfg w
+
+        (* ─────────────────────────────────────────────────────────────────────────── *)
+        (* Attribute dependency graph (aux)                                           *)
+        (* ─────────────────────────────────────────────────────────────────────────── *)
+
+        let node_key (sym : symbol) (occ : int) (attr : attribute) : string =
+          Printf.sprintf "%s[%d].%s" (symb2str sym) occ (symb2str attr)
+
+        let occ_index_of_ref (r: rule) ((var, i) : symbol * int) : int =
+          let i' = normalize_default_index r.head var i in
+          if i' = 0 then 0
+          else
+            let target_k =
+              if i' = -1 then 1
+              else if i' > 0 then i'
+              else failwith "cycle-check: invalid attribute index"
+            in
+            let rec loop j seen = function
+              | [] -> failwith "cycle-check: child occurrence out of range"
+              | s :: tl ->
+                  let seen' = if s = var then seen + 1 else seen in
+                  if s = var && seen' = target_k then j else loop (j + 1) seen' tl
+            in
+            loop 1 0 r.body
+
+        let sym_occ_of_ref (r:rule) (var,i) : symbol * int =
+          let j = occ_index_of_ref r (var,i) in
+          let sym = if j = 0 then r.head else var in
+          (sym, j)
+
+        let rec refs_in_expr (r:rule) (e:expression) : (symbol * int * attribute) list =
+          match e with
+          | Const _ -> []
+          | Apply (a, (v,i)) ->
+              let (s, j) = sym_occ_of_ref r (v,i) in
+              [ (s, j, a) ]
+          | Expr (_, l, rgt) ->
+              refs_in_expr r l @ refs_in_expr r rgt
+
+        let assoc_opt k lst =
+          try Some (List.assoc k lst) with Not_found -> None
+
+        let add_node (u:string) (g:(string * string list) list) : (string * string list) list =
+          match assoc_opt u g with
+          | Some _ -> g
+          | None -> (u, []) :: g
+
+        let add_edge (u:string) (v:string) (g:(string * string list) list)
+          : (string * string list) list =
+          let g = add_node v (add_node u g) in
+          let succs = match assoc_opt u g with Some xs -> xs | None -> [] in
+          if List.exists ((=) v) succs then g
+          else
+            let g_without_u = List.remove_assoc u g in
+            (u, v :: succs) :: g_without_u
+
+        let build_dep_graph (ag:t) : (string * string list) list =
+          let rules = SetUtil.to_list ag.rules in
+          List.fold_left
+            (fun g r ->
+               Set.fold_left
+                 (fun g eq ->
+                    match eq with
+                    | Apply (attrL, (varL, iL)), rhs ->
+                        let (sL, jL) = sym_occ_of_ref r (varL, iL) in
+                        let dst = node_key sL jL attrL in
+                        let g = add_node dst g in
+                        let refs = refs_in_expr r rhs in
+                        List.fold_left
+                          (fun g (s, j, a) ->
+                             let src = node_key s j a in
+                             add_edge src dst g)
+                          g refs
+                    | _ -> g)
+                 g r.equations)
+            []  (* empty graph *)
+            rules
+
+        let all_nodes (g:(string * string list) list) : string list =
+          let add_uniq x xs = if List.mem x xs then xs else x :: xs in
+          List.fold_left
+            (fun acc (u, vs) ->
+               let acc = add_uniq u acc in
+               List.fold_left (fun a v -> add_uniq v a) acc vs)
+            []
+            g
+
+        let has_cycle_graph (g:(string * string list) list) : bool =
+          let rec dfs (u:string) (gray:string list) (black:string list)
+            : bool * string list =
+            if List.mem u gray then (true, black)           (* back-edge found *)
+            else if List.mem u black then (false, black)    (* already processed *)
+            else
+              let gray' = u :: gray in
+              let succs = match assoc_opt u g with Some xs -> xs | None -> [] in
+              let found, black' =
+                List.fold_left
+                  (fun (acc_found, acc_black) v ->
+                     if acc_found then (true, acc_black)
+                     else dfs v gray' acc_black)
+                  (false, black)
+                  succs
+              in
+              if found then (true, black') else (false, u :: black')
+          in
+          let nodes = all_nodes g in
+          let _, cycle =
+            List.fold_left
+              (fun (black, acc_cycle) u ->
+                 if acc_cycle then (black, true)
+                 else
+                   let (found, black') = dfs u [] black in
+                   (black', found))
+              ([], false)
+              nodes
+          in
+          cycle
+
+        let has_attr_cycle (ag:t) : bool =
+          ag |> build_dep_graph |> has_cycle_graph
+
+        let has_cycles (rep : t) : bool =
+          has_attr_cycle rep
 
       end
 
@@ -731,6 +814,7 @@
 		let stats = Model.stats
 		let accept = accept
         let accept_ag_with_tree = accept_ag_with_tree
+        let has_cycles = has_cycles
         let generate ?max_depth ?max_words = generate ?max_depth ?max_words
 
 	end
@@ -751,25 +835,92 @@
         let e s = (symb s, Set.empty);;
 
         let ag1 = {| {
-                kind : "attribute grammar",
-                description : "",
-                name : "ag3",
-                alphabet : ["[", "]"],
-                variables : ["S","E"],
-                inherited : ["d"],
-                synthesized : ["v"],
-                initial : "S",
-                rules : [ "S -> E {v(S) = v(E) ; d(E) = 5}",
-                          "E -> ~ {v(E) = d(E) + 1}"
-                            ]
-                    } |}
+                        kind : "attribute grammar",
+                        description : "",
+                        name : "ag1",
+                        alphabet : ["0","1","2","3","4","5","6","7","8","9","+"],
+                        variables : ["S","E","F"],
+                        inherited : [""],
+                        synthesized : ["v"],
+                        initial : "S",
+                        rules : [ "S -> E {v(S) = v(E)}",
+                                    "E -> E + F {v(E0) = v(E1) + v(F)}",
+                                    "E -> F {v(E) = v(F)}",
+                                    "F -> 0 {v(F) = 0}",
+                                    "F -> 1 {v(F) = 1}",
+                                    "F -> 2 {v(F) = 2}",
+                                    "F -> 3 {v(F) = 3}",
+                                    "F -> 4 {v(F) = 4}",
+                                    "F -> 5 {v(F) = 5}",
+                                    "F -> 6 {v(F) = 6}",
+                                    "F -> 7 {v(F) = 7}",
+                                    "F -> 8 {v(F) = 8}",
+                                    "F -> 9 {v(F) = 9}"
+                                    ]
+                        } |}
 
         let pt1 =
-                Node (e "S", [
-                    Node (e "E", [
-                      Leaf (e "~")
-                    ])
-                ])
+                        Node (e "S", [
+                            Node (e "E", [
+                                 Node (e "E", [
+                                     Node (e "F", [
+                                          Leaf (e "3")
+                                    ])
+                                ]);
+                                Leaf (e "+");
+                                Node (e "F", [
+                                    Leaf (e "2")
+                                ])
+                          ] )
+                        ])
+
+        let pt3 =
+               Node (e "S", [
+                   Node (e "E", [
+                     Leaf (e "~")
+                   ])
+               ])
+
+        let ok_ag = {| {
+          kind : "attribute grammar",
+          description : "acyclic sanity",
+          name : "ok_ag",
+          alphabet : ["a","+"],
+          variables : ["S","F"],
+          inherited : [""],
+          synthesized : ["v"],
+          initial : "S",
+          rules : [
+            "S -> F { v(S) = v(F) }",
+            "F -> a { v(F) = 1 }"
+          ]
+        } |}
+
+        let cyc_ag = {| {
+          kind : "attribute grammar",
+          description : "deliberate cycle",
+          name : "cyc_ag",
+          alphabet : ["a"],
+          variables : ["S"],
+          inherited : [""],
+          synthesized : ["v"],
+          initial : "S",
+          rules : [
+            "S -> S { v(S0) = v(S0) }"
+          ]
+        } |}
+
+        let test_has_cycles_ok () =
+          Util.header "has_cycles_ok";
+          let g = AttributeGrammarSupport.fromJSon (JSon.parse ok_ag) in
+          let r = has_cycles g in
+          Printf.printf "has_cycles(ok_ag) = %b (expected false)\n" r
+
+        let test_has_cycles_detected () =
+          Util.header "has_cycles_detected";
+          let g = AttributeGrammarSupport.fromJSon (JSon.parse cyc_ag) in
+          let r = has_cycles g in
+          Printf.printf "has_cycles(cyc_ag) = %b (expected true)\n" r
 
 		let test0 () =
 			let j = JSon.parse ag1 in
@@ -778,38 +929,53 @@
 				JSon.show h
 
 		let test1 () =
+		    Util.header "test1";
 			let g = make (Arg.Text ag1) in
-			let newTree = calcAtributes g pt1 in
+			let newTree = calcAttributes g pt1 in
 			Printf.printf "Final parse tree:\n";
 			print_parse_tree newTree
 
         let test_accept_with_tree_ok () =
+          Util.header "test_accept_with_tree_ok";
           let g = make (Arg.Text ag1) in
-          let ok = accept_ag_with_tree g pt1 in
+          let ok = accept_ag_with_tree g pt3 in
           Printf.printf "accept_ag_with_tree(pt1) = %b\n" ok
 
         let test_accept_words () =
+          Util.header "test_accept_words";
           let g = AttributeGrammar.make (Arg.Text ag1) in
 
           let cfg : ContextFreeGrammarBasic.t =
             AttributeGrammarPrivate.ga_to_cfg g
           in
           let sym = BasicTypes.str2symb in
-          let three = sym "3" and star = sym "*" and two = sym "2" in
+          let three = sym "9" and star = sym "-" and two = sym "2" in
           let w = [three; star; two] in
 
           let r = ContextFreeGrammarBasic.accept cfg w in
-          Printf.printf "AG->CFG.accept %s = %b (expected: true)\n"
+          Printf.printf "AG->CFG.accept %s = %b\n"
             (BasicTypes.word2str w) r
+
+        let generate_words () =
+          Util.header "test_generate_words";
+          let g = AttributeGrammar.make (Arg.Text ag1) in
+          let words = AttributeGrammar.generate ~max_depth:5 ~max_words:100 g in
+          Printf.printf "generate: produced %d words (max_depth=5, max_words=10)\n"
+            (List.length words);
+          (* Pretty-print the results *)
+          List.iter
+            (fun w -> Printf.printf "  %s\n" (BasicTypes.word2str w))
+            words
         ;;
 
         let runAll =
           if Util.testing active "AttributeGrammarSupport" then begin
-            Util.header "test1";
+
             test1 ();
-
-            Util.header "test_accept_with_tree_ok";
-
-            Util.header "test_accept_words";
+            (*test_accept_with_tree_ok ();*)
+            (*generate_words ();*)
+            (*test_accept_words ();*)
+            test_has_cycles_ok ();
+            test_has_cycles_detected ();
           end
 	end
