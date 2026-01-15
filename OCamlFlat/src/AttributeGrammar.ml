@@ -124,25 +124,21 @@
           match lhs with
           | Apply (attr, (var, i)) ->
               let i' = normalize_default_index r.head var i in
-              if i' = 0 then
-                if var <> r.head then
-                  Error.error name "LHS refers head but head symbol mismatch" ()
-              else
+              if i' = 0 then (
+                if var <> r.head then Error.error name "LHS refers head but head symbol mismatch" ()
+              ) else (
                 let c = occurs_in_body r var in
-                if c < i' then
-                  Error.error name "LHS child index out of range" ();
-
+                if c < i' then Error.error name "LHS child index out of range" ()
+              );
               if not (Set.belongs var ag.variables) then
                 Error.error name "LHS variable is not a grammar variable" ();
-
               validate_lhs_direction name ag r lhs;
-
-              let lhs_type = validateExp name ag r lhs in
-              let rhs_type = validateExp name ag r rhs in
-              if lhs_type = rhs_type && lhs_type <> "error" then ()
-              else Error.error name "Type mismatch in equation" ()
-          | _ -> Error.error name "LHS of equation must be Apply" ()
-
+              let lt = validateExp name ag r lhs in
+              let rt = validateExp name ag r rhs in
+              if lt = rt && lt <> "error" then () else
+                Error.error name "Type mismatch in equation" ()
+          | _ ->
+              Error.error name "LHS of equation must be Apply" ()
 
         let validateCondition (name: string) (ag: t) (cond: condition) (rule: rule): unit =
            if validateExp name ag rule cond = "bool" then ()
@@ -716,44 +712,25 @@
         let e s = (symb s, Set.empty);;
 
         let ag1 = {| {
-                kind : "attribute grammar",
-                description : "",
-                name : "ag1",
-                alphabet : ["0","1","2","3","4","5","6","7","8","9","*"],
-                variables : ["S","E","F"],
-                inherited : [""],
-                synthesized : ["v"],
-                initial : "S",
-                rules : [ "S -> E {v(S) = v(E)}",
-                            "E -> E * F {v(E0) = v(E1) * v(F)}",
-                            "E -> F {v(E) = v(F)}",
-                            "F -> 0 {v(F) = 0}",
-                            "F -> 1 {v(F) = 1}",
-                            "F -> 2 {v(F) = 2}",
-                            "F -> 3 {v(F) = 3}",
-                            "F -> 4 {v(F) = 4}",
-                            "F -> 5 {v(F) = 5}",
-                            "F -> 6 {v(F) = 6}",
-                            "F -> 7 {v(F) = 7}",
-                            "F -> 8 {v(F) = 8}",
-                            "F -> 9 {v(F) = 9}"
-                            ]
-                } |}
+                        kind : "attribute grammar",
+                        description : "",
+                        name : "ag3",
+                        alphabet : [""],
+                        variables : ["S","E"],
+                        inherited : ["d"],
+                        synthesized : ["v"],
+                        initial : "S",
+                        rules : [ "S -> E {v(S) = v(E) ; d(E) = 5}",
+                                  "E -> ~ {v(E) = d(E) + 1}"
+                                    ]
+                            } |}
 
         let pt1 =
-                Node (e "S", [
-                    Node (e "E", [
-                         Node (e "E", [
-                             Node (e "F", [
-                                  Leaf (e "3")
+                        Node (e "S", [
+                            Node (e "E", [
+                              Leaf (e "~")
                             ])
-                        ]);
-                        Leaf (e "*");
-                        Node (e "F", [
-                            Leaf (e "2")
                         ])
-                  ] )
-                ])
 
 		let test0 () =
 			let j = JSon.parse ag1 in
