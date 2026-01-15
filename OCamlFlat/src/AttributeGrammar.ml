@@ -659,16 +659,138 @@
             ) cfg.rules : AttributeGrammarSupport.rules); (* Correct placement of type annotation *)
           }
 
-          let validate (name: string) (rep: t): unit =
-                      let cfg = ga_to_cfg rep in
-                          ContextFreeGrammarPrivate.validate name cfg;
-                          validateEquations name rep;
-                          validateConditions name rep
-
+         let validate (name: string) (rep: t): unit =
+                   let cfg = ga_to_cfg rep in
+                   ContextFreeGrammarPrivate.validate name cfg;
+                   validateEquations name rep;
+                   validateConditions name rep
 
 		let accept (ag: t) (w: word): bool =
           let cfg = ga_to_cfg ag in
           ContextFreeGrammarBasic.accept cfg w
+
+        (* ─────────────────────────────────────────────────────────────────────────── *)
+        (* Attribute dependency graph (aux)                                           *)
+        (* ─────────────────────────────────────────────────────────────────────────── *)
+
+        let node_key (sym : symbol) (occ : int) (attr : attribute) : string =
+          Printf.sprintf "%s[%d].%s" (symb2str sym) occ (symb2str attr)
+
+        let occ_index_of_ref (r: rule) ((var, i) : symbol * int) : int =
+          let i' = normalize_default_index r.head var i in
+          if i' = 0 then 0
+          else
+            let target_k =
+              if i' = -1 then 1
+              else if i' > 0 then i'
+              else failwith "cycle-check: invalid attribute index"
+            in
+            let rec loop j seen = function
+              | [] -> failwith "cycle-check: child occurrence out of range"
+              | s :: tl ->
+                  let seen' = if s = var then seen + 1 else seen in
+                  if s = var && seen' = target_k then j else loop (j + 1) seen' tl
+            in
+            loop 1 0 r.body
+
+        let sym_occ_of_ref (r:rule) (var,i) : symbol * int =
+          let j = occ_index_of_ref r (var,i) in
+          let sym = if j = 0 then r.head else var in
+          (sym, j)
+
+        let rec refs_in_expr (r:rule) (e:expression) : (symbol * int * attribute) list =
+          match e with
+          | Const _ -> []
+          | Apply (a, (v,i)) ->
+              let (s, j) = sym_occ_of_ref r (v,i) in
+              [ (s, j, a) ]
+          | Expr (_, l, rgt) ->
+              refs_in_expr r l @ refs_in_expr r rgt
+
+        let assoc_opt k lst =
+          try Some (List.assoc k lst) with Not_found -> None
+
+        let add_node (u:string) (g:(string * string list) list) : (string * string list) list =
+          match assoc_opt u g with
+          | Some _ -> g
+          | None -> (u, []) :: g
+
+        let add_edge (u:string) (v:string) (g:(string * string list) list)
+          : (string * string list) list =
+          let g = add_node v (add_node u g) in
+          let succs = match assoc_opt u g with Some xs -> xs | None -> [] in
+          if List.exists ((=) v) succs then g
+          else
+            let g_without_u = List.remove_assoc u g in
+            (u, v :: succs) :: g_without_u
+
+        let build_dep_graph (ag:t) : (string * string list) list =
+          let rules = SetUtil.to_list ag.rules in
+          List.fold_left
+            (fun g r ->
+               Set.fold_left
+                 (fun g eq ->
+                    match eq with
+                    | Apply (attrL, (varL, iL)), rhs ->
+                        let (sL, jL) = sym_occ_of_ref r (varL, iL) in
+                        let dst = node_key sL jL attrL in
+                        let g = add_node dst g in
+                        let refs = refs_in_expr r rhs in
+                        List.fold_left
+                          (fun g (s, j, a) ->
+                             let src = node_key s j a in
+                             add_edge src dst g)
+                          g refs
+                    | _ -> g)
+                 g r.equations)
+            []  (* empty graph *)
+            rules
+
+        let all_nodes (g:(string * string list) list) : string list =
+          let add_uniq x xs = if List.mem x xs then xs else x :: xs in
+          List.fold_left
+            (fun acc (u, vs) ->
+               let acc = add_uniq u acc in
+               List.fold_left (fun a v -> add_uniq v a) acc vs)
+            []
+            g
+
+        let has_cycle_graph (g:(string * string list) list) : bool =
+          let rec dfs (u:string) (gray:string list) (black:string list)
+            : bool * string list =
+            if List.mem u gray then (true, black)           (* back-edge found *)
+            else if List.mem u black then (false, black)    (* already processed *)
+            else
+              let gray' = u :: gray in
+              let succs = match assoc_opt u g with Some xs -> xs | None -> [] in
+              let found, black' =
+                List.fold_left
+                  (fun (acc_found, acc_black) v ->
+                     if acc_found then (true, acc_black)
+                     else dfs v gray' acc_black)
+                  (false, black)
+                  succs
+              in
+              if found then (true, black') else (false, u :: black')
+          in
+          let nodes = all_nodes g in
+          let _, cycle =
+            List.fold_left
+              (fun (black, acc_cycle) u ->
+                 if acc_cycle then (black, true)
+                 else
+                   let (found, black') = dfs u [] black in
+                   (black', found))
+              ([], false)
+              nodes
+          in
+          cycle
+
+        let has_attr_cycle (ag:t) : bool =
+          ag |> build_dep_graph |> has_cycle_graph
+
+        let has_cycles (rep : t) : bool =
+          has_attr_cycle rep
 
       end
 
@@ -692,6 +814,7 @@
 		let stats = Model.stats
 		let accept = accept
         let accept_ag_with_tree = accept_ag_with_tree
+        let has_cycles = has_cycles
         let generate ?max_depth ?max_words = generate ?max_depth ?max_words
 
 	end
@@ -758,6 +881,47 @@
                    ])
                ])
 
+        let ok_ag = {| {
+          kind : "attribute grammar",
+          description : "acyclic sanity",
+          name : "ok_ag",
+          alphabet : ["a","+"],
+          variables : ["S","F"],
+          inherited : [""],
+          synthesized : ["v"],
+          initial : "S",
+          rules : [
+            "S -> F { v(S) = v(F) }",
+            "F -> a { v(F) = 1 }"
+          ]
+        } |}
+
+        let cyc_ag = {| {
+          kind : "attribute grammar",
+          description : "deliberate cycle",
+          name : "cyc_ag",
+          alphabet : ["a"],
+          variables : ["S"],
+          inherited : [""],
+          synthesized : ["v"],
+          initial : "S",
+          rules : [
+            "S -> S { v(S0) = v(S0) }"
+          ]
+        } |}
+
+        let test_has_cycles_ok () =
+          Util.header "has_cycles_ok";
+          let g = AttributeGrammarSupport.fromJSon (JSon.parse ok_ag) in
+          let r = has_cycles g in
+          Printf.printf "has_cycles(ok_ag) = %b (expected false)\n" r
+
+        let test_has_cycles_detected () =
+          Util.header "has_cycles_detected";
+          let g = AttributeGrammarSupport.fromJSon (JSon.parse cyc_ag) in
+          let r = has_cycles g in
+          Printf.printf "has_cycles(cyc_ag) = %b (expected true)\n" r
+
 		let test0 () =
 			let j = JSon.parse ag1 in
 			let g = fromJSon j in
@@ -765,31 +929,35 @@
 				JSon.show h
 
 		let test1 () =
+		    Util.header "test1";
 			let g = make (Arg.Text ag1) in
 			let newTree = calcAttributes g pt1 in
 			Printf.printf "Final parse tree:\n";
 			print_parse_tree newTree
 
         let test_accept_with_tree_ok () =
+          Util.header "test_accept_with_tree_ok";
           let g = make (Arg.Text ag1) in
           let ok = accept_ag_with_tree g pt3 in
           Printf.printf "accept_ag_with_tree(pt1) = %b\n" ok
 
         let test_accept_words () =
+          Util.header "test_accept_words";
           let g = AttributeGrammar.make (Arg.Text ag1) in
 
           let cfg : ContextFreeGrammarBasic.t =
             AttributeGrammarPrivate.ga_to_cfg g
           in
           let sym = BasicTypes.str2symb in
-          let three = sym "3" and star = sym "+" and two = sym "2" in
+          let three = sym "9" and star = sym "-" and two = sym "2" in
           let w = [three; star; two] in
 
           let r = ContextFreeGrammarBasic.accept cfg w in
-          Printf.printf "AG->CFG.accept %s = %b (expected: true)\n"
+          Printf.printf "AG->CFG.accept %s = %b\n"
             (BasicTypes.word2str w) r
 
         let generate_words () =
+          Util.header "test_generate_words";
           let g = AttributeGrammar.make (Arg.Text ag1) in
           let words = AttributeGrammar.generate ~max_depth:5 ~max_words:100 g in
           Printf.printf "generate: produced %d words (max_depth=5, max_words=10)\n"
@@ -802,13 +970,12 @@
 
         let runAll =
           if Util.testing active "AttributeGrammarSupport" then begin
-            Util.header "test1";
+
             test1 ();
-
-            Util.header "test_accept_with_tree_ok";
             (*test_accept_with_tree_ok ();*)
-
-            Util.header "test_generate_words";
             (*generate_words ();*)
+            (*test_accept_words ();*)
+            test_has_cycles_ok ();
+            test_has_cycles_detected ();
           end
 	end
