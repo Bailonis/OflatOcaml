@@ -67,28 +67,28 @@
               if attr_exists attr then
                 if vars_exists var then
                   if validateAttrArg ag r attr (var, i) then "int"
-                  else Error.error name  "Argumento do Atributo invalido" "error"
-                else  Error.error name  "Variável não encontrada" "error"
-              else Error.error name  "Atributo não encontrado" "error"
+                  else Error.error name  "Invalid attribute argument" "error"
+                else  Error.error name  "Variable not found" "error"
+              else Error.error name  "Attribute not found" "error"
             | Expr (op, l, r_expr) ->
                 let tl = validateExp name ag r l in
                 let tr = validateExp name ag r r_expr in
-                if tl <> tr then Error.error name "Incompatibilidade de tipos" "error" else
+                if tl <> tr then Error.error name "Type mismatch" "error" else
                 match op, tl with
                 | "(", _ -> tl
                 | "+", "int" -> "int"
-                | "+", "string" -> "string"               (* allow concat *)
-                | "+", _ -> Error.error name "Tipos inválidos para +" "error"
+                | "+", "string" -> "string"
+                | "+", _ -> Error.error name "Invalid types for +" "error"
                 | "-", "int" -> "int"
-                | "-", _ -> Error.error name "Tipos inválidos para -" "error"
+                | "-", _ -> Error.error name "Invalid types for -" "error"
                 | "*", "int" -> "int"
-                | "*", _ -> Error.error name "Tipos inválidos para *" "error"
+                | "*", _ -> Error.error name "Invalid types for *" "error"
                 | "/", "int" -> "int"
-                | "/", _ -> Error.error name "Tipos inválidos para /" "error"
+                | "/", _ -> Error.error name "Invalid types for /" "error"
                 | ("=" | "<>"), _ -> "bool"               (* same-type equality already ensured *)
                 | ("<" | "<=" | ">" | ">="), ("int" | "string") -> "bool"
-                | ("<" | "<=" | ">" | ">="), _ -> Error.error name "Tipos inválidos para comparação" "error"
-                | _ -> Error.error name "Operador desconhecido" "error"
+                | ("<" | "<=" | ">" | ">="), _ -> Error.error name "Invalid types for comparison" "error"
+                | _ -> Error.error name "Unknown operator" "error"
 
 
         let normalize_default_index (head_sym: symbol) (var: symbol) (i: int): int =
@@ -142,7 +142,7 @@
 
         let validateCondition (name: string) (ag: t) (cond: condition) (rule: rule): unit =
            if validateExp name ag rule cond = "bool" then ()
-           else Error.error name "Condição deve ser booleana" ()
+               else Error.error name "The condition must be boolean" ()
 
         let validateEquations (name: string) (rep: t): unit =
             Set.iter (fun r ->
