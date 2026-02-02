@@ -67,28 +67,28 @@
               if attr_exists attr then
                 if vars_exists var then
                   if validateAttrArg ag r attr (var, i) then "int"
-                  else Error.error name  "Argumento do Atributo invalido" "error"
-                else  Error.error name  "Variável não encontrada" "error"
-              else Error.error name  "Atributo não encontrado" "error"
+                  else Error.error name  "Invalid attribute argument" "error"
+                else  Error.error name  "Variable not found" "error"
+              else Error.error name  "Attribute not found" "error"
             | Expr (op, l, r_expr) ->
                 let tl = validateExp name ag r l in
                 let tr = validateExp name ag r r_expr in
-                if tl <> tr then Error.error name "Incompatibilidade de tipos" "error" else
+                if tl <> tr then Error.error name "Type mismatch" "error" else
                 match op, tl with
                 | "(", _ -> tl
                 | "+", "int" -> "int"
-                | "+", "string" -> "string"               (* allow concat *)
-                | "+", _ -> Error.error name "Tipos inválidos para +" "error"
+                | "+", "string" -> "string"
+                | "+", _ -> Error.error name "Invalid types for +" "error"
                 | "-", "int" -> "int"
-                | "-", _ -> Error.error name "Tipos inválidos para -" "error"
+                | "-", _ -> Error.error name "Invalid types for -" "error"
                 | "*", "int" -> "int"
-                | "*", _ -> Error.error name "Tipos inválidos para *" "error"
+                | "*", _ -> Error.error name "Invalid types for *" "error"
                 | "/", "int" -> "int"
-                | "/", _ -> Error.error name "Tipos inválidos para /" "error"
+                | "/", _ -> Error.error name "Invalid types for /" "error"
                 | ("=" | "<>"), _ -> "bool"               (* same-type equality already ensured *)
                 | ("<" | "<=" | ">" | ">="), ("int" | "string") -> "bool"
-                | ("<" | "<=" | ">" | ">="), _ -> Error.error name "Tipos inválidos para comparação" "error"
-                | _ -> Error.error name "Operador desconhecido" "error"
+                | ("<" | "<=" | ">" | ">="), _ -> Error.error name "Invalid types for comparison" "error"
+                | _ -> Error.error name "Unknown operator" "error"
 
 
         let normalize_default_index (head_sym: symbol) (var: symbol) (i: int): int =
@@ -142,7 +142,7 @@
 
         let validateCondition (name: string) (ag: t) (cond: condition) (rule: rule): unit =
            if validateExp name ag rule cond = "bool" then ()
-           else Error.error name "Condição deve ser booleana" ()
+               else Error.error name "The condition must be boolean" ()
 
         let validateEquations (name: string) (rep: t): unit =
             Set.iter (fun r ->
@@ -669,128 +669,110 @@
           let cfg = ga_to_cfg ag in
           ContextFreeGrammarBasic.accept cfg w
 
-        (* ─────────────────────────────────────────────────────────────────────────── *)
-        (* Attribute dependency graph (aux)                                           *)
-        (* ─────────────────────────────────────────────────────────────────────────── *)
-
-        let node_key (sym : symbol) (occ : int) (attr : attribute) : string =
-          Printf.sprintf "%s[%d].%s" (symb2str sym) occ (symb2str attr)
-
-        let occ_index_of_ref (r: rule) ((var, i) : symbol * int) : int =
+        let occ_index_of_ref (r : rule) (var,i) : int =
           let i' = normalize_default_index r.head var i in
           if i' = 0 then 0
           else
             let target_k =
               if i' = -1 then 1
               else if i' > 0 then i'
-              else failwith "cycle-check: invalid attribute index"
+              else failwith "invalid attribute index"
             in
             let rec loop j seen = function
-              | [] -> failwith "cycle-check: child occurrence out of range"
+              | [] -> failwith "child occurrence out of range"
               | s :: tl ->
                   let seen' = if s = var then seen + 1 else seen in
-                  if s = var && seen' = target_k then j else loop (j + 1) seen' tl
+                  if s = var && seen' = target_k then j
+                  else loop (j+1) seen' tl
             in
             loop 1 0 r.body
 
-        let sym_occ_of_ref (r:rule) (var,i) : symbol * int =
+        let sym_occ_of_ref r (var,i) =
           let j = occ_index_of_ref r (var,i) in
           let sym = if j = 0 then r.head else var in
           (sym, j)
 
-        let rec refs_in_expr (r:rule) (e:expression) : (symbol * int * attribute) list =
+        let rec refs_in_expr r e =
           match e with
           | Const _ -> []
-          | Apply (a, (v,i)) ->
-              let (s, j) = sym_occ_of_ref r (v,i) in
-              [ (s, j, a) ]
+          | Apply (attr,(v,i)) ->
+              let (s,j) = sym_occ_of_ref r (v,i) in
+              [ (s,j,attr) ]
           | Expr (_, l, rgt) ->
               refs_in_expr r l @ refs_in_expr r rgt
 
-        let assoc_opt k lst =
-          try Some (List.assoc k lst) with Not_found -> None
+        type node_key = symbol * int * attribute
 
-        let add_node (u:string) (g:(string * string list) list) : (string * string list) list =
-          match assoc_opt u g with
-          | Some _ -> g
-          | None -> (u, []) :: g
+        let build_dep_graph (ag : t) : int list array =
+          let index_tbl : (node_key, int) Hashtbl.t = Hashtbl.create 64 in
+          let counter = ref 0 in
 
-        let add_edge (u:string) (v:string) (g:(string * string list) list)
-          : (string * string list) list =
-          let g = add_node v (add_node u g) in
-          let succs = match assoc_opt u g with Some xs -> xs | None -> [] in
-          if List.exists ((=) v) succs then g
-          else
-            let g_without_u = List.remove_assoc u g in
-            (u, v :: succs) :: g_without_u
+          let get_id key =
+            match Hashtbl.find_opt index_tbl key with
+            | Some id -> id
+            | None ->
+                let id = !counter in
+                incr counter;
+                Hashtbl.add index_tbl key id;
+                id
+          in
 
-        let build_dep_graph (ag:t) : (string * string list) list =
+          let edges = ref [] in
+
           let rules = SetUtil.to_list ag.rules in
-          List.fold_left
-            (fun g r ->
-               Set.fold_left
-                 (fun g eq ->
-                    match eq with
-                    | Apply (attrL, (varL, iL)), rhs ->
-                        let (sL, jL) = sym_occ_of_ref r (varL, iL) in
-                        let dst = node_key sL jL attrL in
-                        let g = add_node dst g in
-                        let refs = refs_in_expr r rhs in
-                        List.fold_left
-                          (fun g (s, j, a) ->
-                             let src = node_key s j a in
-                             add_edge src dst g)
-                          g refs
-                    | _ -> g)
-                 g r.equations)
-            []  (* empty graph *)
-            rules
 
-        let all_nodes (g:(string * string list) list) : string list =
-          let add_uniq x xs = if List.mem x xs then xs else x :: xs in
-          List.fold_left
-            (fun acc (u, vs) ->
-               let acc = add_uniq u acc in
-               List.fold_left (fun a v -> add_uniq v a) acc vs)
-            []
-            g
+          List.iter (fun r ->
+            Set.iter (fun eq ->
+              match eq with
+              | Apply (attrL, (vL,iL)), rhs ->
+                  let (sL,jL) = sym_occ_of_ref r (vL,iL) in
+                  let dst_key = (sL, jL, attrL) in
+                  let dst = get_id dst_key in
 
-        let has_cycle_graph (g:(string * string list) list) : bool =
-          let rec dfs (u:string) (gray:string list) (black:string list)
-            : bool * string list =
-            if List.mem u gray then (true, black)           (* back-edge found *)
-            else if List.mem u black then (false, black)    (* already processed *)
-            else
-              let gray' = u :: gray in
-              let succs = match assoc_opt u g with Some xs -> xs | None -> [] in
-              let found, black' =
-                List.fold_left
-                  (fun (acc_found, acc_black) v ->
-                     if acc_found then (true, acc_black)
-                     else dfs v gray' acc_black)
-                  (false, black)
-                  succs
-              in
-              if found then (true, black') else (false, u :: black')
+                  let refs = refs_in_expr r rhs in
+                  List.iter (fun (s,j,a) ->
+                    let src = get_id (s,j,a) in
+                    edges := (src, dst) :: !edges
+                  ) refs
+
+              | _ -> ()
+            ) r.equations
+          ) rules;
+
+          let n = !counter in
+          let adj = Array.make n [] in
+          List.iter (fun (u,v) -> adj.(u) <- v :: adj.(u)) !edges;
+          adj
+
+        let rec dfs adj u visited stack =
+          if stack.(u) then true
+          else if visited.(u) then false
+          else (
+            visited.(u) <- true;
+            stack.(u) <- true;
+
+            let found = List.exists (fun v -> dfs adj v visited stack) adj.(u) in
+
+            stack.(u) <- false;
+            found
+          )
+
+        let has_cycle_graph adj =
+          let n = Array.length adj in
+          let visited = Array.make n false in
+          let stack   = Array.make n false in
+
+          let rec loop i =
+            if i = n then false
+            else if (not visited.(i)) && dfs adj i visited stack
+            then true
+            else loop (i+1)
           in
-          let nodes = all_nodes g in
-          let _, cycle =
-            List.fold_left
-              (fun (black, acc_cycle) u ->
-                 if acc_cycle then (black, true)
-                 else
-                   let (found, black') = dfs u [] black in
-                   (black', found))
-              ([], false)
-              nodes
-          in
-          cycle
 
-        let has_attr_cycle (ag:t) : bool =
+          loop 0
+
+        let has_cycles (ag : t) : bool =
           ag |> build_dep_graph |> has_cycle_graph
-
-        let has_cycles (rep : t) : bool =
-          has_attr_cycle rep
 
       end
 
