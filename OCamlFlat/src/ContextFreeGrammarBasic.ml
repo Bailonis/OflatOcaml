@@ -190,6 +190,7 @@ struct
 		let isValidVariables = not (Set.belongs epsilon rep.variables) in
 		let isIntersectionValid = (Set.inter rep.variables rep.alphabet) = Set.empty in
 		let isInitialValid = Set.belongs rep.initial rep.variables in
+
 		let areRuleHeadsValid =
 			let hs = Set.map (fun r -> r.head) rep.rules in
 				Set.subset hs rep.variables
@@ -217,29 +218,231 @@ struct
 		if not areRuleBodiesValid then
 			Error.error name
 				"Some rule bodies are not declared symbols" ()
-				
-	let accept (fe: t) (w: word): bool =
-		false (* TODO *)
+end
 
-	let generate (fe: t) (length: int): words =
-		Set.empty (* TODO *)
+
+module ContextFreeGrammarAccept = (* AMD *)
+struct
+	open ContextFreeGrammarSupport
+
+	let clearEpsilon (cfg : t) : t = {
+		alphabet = cfg.alphabet;
+		variables = cfg.variables;
+		initial = cfg.initial;
+		rules =
+			Set.map
+				(fun r -> {head = r.head; body = wordClear r.body})
+				cfg.rules
+	}
+
+	let isVariable (cfg : t) (var : symbol) : bool =
+		Set.belongs var cfg.variables
+
+	let isTerminalSymbol (cfg : t) (symbol : symbol) : bool =
+		Set.belongs symbol cfg.alphabet
+
+	let hasEmpty body =
+		body = [epsilon]
+
+	let initialConfig (cfg: t) (w: word) : configurations =
+		Set.make [([cfg.initial], wordClear w)]
+
+	let rec expand (cfg: t) ((sf, w): word*word) : configurations =
+		match sf with
+			| [] -> Set.make [([],w)]
+			| x::xs ->
+				let ySet = expand cfg (xs, w) in
+					if isTerminalSymbol cfg x then
+						Set.map (fun (fs, w) -> (x::fs, w)) ySet
+					else
+						let xRules = Set.filter(fun r -> r.head = x) cfg.rules in
+						let xBodies = Set.map (fun r -> r.body) xRules in
+						let res = Set.flatMap (fun (fs1, w) -> Set.map (fun fs2 -> (fs2@fs1, w)) xBodies) ySet in
+						res
+
+	let nextConfigs (cfg: t) ((sf, w): word*word) : configurations =
+		expand cfg (sf,w)
+
+	let nextConfigs1 (cfg: t) ((sf, w): word*word) : configurations =
+		let _ = Util.show (word2str sf) in
+		let res = expand cfg (sf,w) in
+			showConfigurations res;
+			res
+
+	let isAcceptingConfig (cfg: t) (rl, w) : bool =
+		rl = w
+
+	let isAcceptingConfig1 (cfg: t) (rl, w) : bool =
+		let _ = Util.show (word2str rl ^ " " ^ (if rl = w then "SIM" else "NO")) in
+			rl = w
+
+	let accept (cfg: t) (w: word) : bool =
+		let cfg = clearEpsilon cfg in
+			Model.accept cfg w initialConfig nextConfigs isAcceptingConfig
+
+	let acceptFull (cfg: t) (w: word) : bool * path * trail =
+		let cfg = clearEpsilon cfg in
+			Model.acceptFull cfg w initialConfig nextConfigs isAcceptingConfig
+	;;
+end
+
+module ContextFreeGrammarParseTree = (* AMD *)
+struct
+	open ContextFreeGrammarSupport
+	open ContextFreeGrammarAccept
+
+	(* Permutation of sets of rules
+         permutations [[1;2;3];[4;5];[6;7]] =
+	          [[1; 4; 6]; [1; 4; 7]; [1; 5; 6]; [1; 5; 7];
+	           [2; 4; 6]; [2; 4; 7]; [2; 5; 6]; [2; 5; 7];
+	           [3; 4; 6]; [3; 4; 7]; [3; 5; 6]; [3; 5; 7]]
+	 *)
+	let rec permutations (ll: 'a list list): 'a list list =
+		match ll with
+		   [] -> [[]]
+		  | l::ls ->
+			let ps = permutations ls in
+				List.flatten (List.map (fun x ->  List.map (fun p -> x::p) ps) l)
+
+	(* Expand variables in sentential form using the rules
+	   pre: len(varsof(sf)) = len(rs) *)
+	let rec sfApply (cfg: t) (sf: word) (rs: rule list): word =
+		match sf, rs with
+		  [], [] -> []
+		| x::xs, [] ->
+			if isVariable cfg x then
+				failwith "apply 1"
+			else x::sfApply cfg xs []
+		| x::xs, r::rs ->
+			if isVariable cfg x then
+				(r.body) @ (sfApply cfg xs rs)
+			else x::sfApply cfg xs (r::rs)
+		| _, _ -> failwith "apply 2"
+	;;
+
+	(* Find appliable rules *)
+	let sfFindAppliableRules (cfg: t) (sf: word): rule list list =
+		let vars = List.filter (isVariable cfg) sf in
+			List.map (fun v -> Set.toList (Set.filter(fun r -> r.head = v) cfg.rules)) vars
+
+	let rec sfFindPermutationX (cfg: t) (sf: word) (sf1: word) (rss: rule list list): rule list =
+		match rss with
+		| [] -> []
+		| rs::rss ->
+			if wordClear (sfApply cfg sf rs) = sf1 then
+				rs
+			else
+				sfFindPermutationX cfg sf sf1 rss
+
+	let sfFindPermutation (cfg: t) (sf: word) (sf1: word): rule list =
+		let rules = sfFindAppliableRules cfg sf in
+		let perms = permutations rules in
+		let perm = sfFindPermutationX cfg sf sf1 perms in
+			perm
+
+	let rec rulesSequence (cfg: t) (p: path): rule list list =
+		match p with
+			[] | [_] -> []
+		| (a,_)::(b,bb)::ps ->
+			(sfFindPermutation cfg a b)::rulesSequence cfg ((b,bb)::ps)
+
+	let rec makeTree (cfg: t) (v: variable) (rss: rule list list): cfgTree =
+		match rss with
+		| rs::rss ->
+			let rs = ref rs in
+			let next () =
+				match !rs with
+				| x::xs -> rs := xs; x
+				| [] -> failwith "makeTree 1"
+			in
+				Root (v,
+					List.map
+						( fun sy ->
+							if isVariable cfg sy then
+								makeTree cfg sy rss
+							else
+								Leaf sy
+						)
+						((next ()).body)
+				)
+		| [] -> failwith "makeTree 2"
+
+	let parseTree (cfg: t) (w: word): cfgTree =
+		let (r,p,_) = acceptFull cfg w in
+			if r then
+				let rss = rulesSequence cfg p in
+					makeTree cfg (cfg.initial) rss
+			else
+				Leaf error
+end
+
+module ContextFreeGrammarGenerate = (* AMD *)
+struct
+	open ContextFreeGrammarSupport
+	open ContextFreeGrammarAccept
+
+	let rec expandsEmpty cfg sym =
+		let xRules = Set.filter(fun r -> r.head = sym) cfg.rules in
+		let xBodies = Set.map (fun r -> r.body) (Set.filter (fun r -> List.length r.body == 1) xRules) in
+		Set.for_all(fun b -> hasEmpty b || List.for_all (fun sy -> expandsEmpty cfg sy && isVariable cfg sy) b) xBodies
+
+	let verifyLength cfg sf body len =
+		let lengthSf = List.length (sf) in
+		let lengthBody = List.length (body) in
+		let sfVars = List.length (List.filter(fun sy -> isVariable cfg sy && expandsEmpty cfg sy) sf) in
+		let bodyVars = List.length (List.filter(fun sy -> isVariable cfg sy && expandsEmpty cfg sy) body) in
+		lengthSf + lengthBody - sfVars - bodyVars - 1 <= len
+
+	let rec expandGenerate (cfg: t) (len: int) (sf,w) : configurations =
+		match sf with
+			| [] -> Set.make [([],[])]
+			| x::xs ->
+				let ySet = expandGenerate cfg len (xs, w) in
+					if isTerminalSymbol cfg x then
+						Set.map (fun (fs, w) -> (x :: fs, w)) ySet
+					else
+						let xRules = Set.filter(fun r -> r.head = x) cfg.rules in
+						let xBodies = Set.map (fun r -> r.body) (Set.filter(fun r -> hasEmpty r.body || verifyLength cfg sf r.body len) xRules) in
+						let res = Set.flatMap (fun (fs1, w) -> Set.map (fun fs2 -> (fs2@fs1, w)) xBodies) ySet in
+						res
+
+	let isAcceptingConfig2 (cfg: t) (sf, w) : bool =
+		List.for_all (isTerminalSymbol cfg) sf
+
+	let nextConfigs2 (cfg: t) (len: int) (sf, w) : configurations =
+		let res = expandGenerate cfg len (sf,w) in
+			res
+
+	let isTerminalSymbol2 (symbol: symbol) : bool =
+		let str = symb2str symbol in
+		not (("A" <= str && str <= "Z") || String.get str 0 = '<' && String.get str (String.length str - 1) = '>')
+
+	let getWord (sf, _) = List.filter (fun symb -> isTerminalSymbol2 symb) sf
+
+	let generate (cfg: t) (len: int) : words =
+		Model.generate cfg len initialConfig nextConfigs2 isAcceptingConfig2 getWord
+
+end
+
 
 (* ----------------------------------------------------------------------------*)
+module ContextFreeGrammarAcceptJP =
+struct
+	open ContextFreeGrammarSupport
 
 	(*CODIGO JP*)
 
 	(*checks if symbol var is a cfg grammar variable*)
-	let isVariable (var : symbol) (cfg : t) : bool = 
+	let isVariable (var : symbol) (cfg : t) : bool =
 		Set.belongs var cfg.variables
-	;;
-	
-		(*checks if symbol symbol is a terminal symbol*)		
-	let isTerminalSymbol (symbol : symbol) (cfg : t) : bool = 
+
+		(*checks if symbol symbol is a terminal symbol*)
+	let isTerminalSymbol (symbol : symbol) (cfg : t) : bool =
 		Set.belongs symbol cfg.alphabet
-	;;
 
 	let isTerminalSymbol2 (symbol: symbol) : bool =
-		not ("A" <= (symb2str symbol) && (symb2str symbol) <= "Z" )
+		let str = symb2str symbol in
+		not (("A" <= str && str <= "Z") || String.get str 0 = '<' && String.get str (String.length str - 1) = '>')
 
 	let hasEmpty body =
 		body = [epsilon]
@@ -248,14 +451,14 @@ struct
 		let xRules = Set.filter(fun r -> r.head = sym) cfg.rules in
 		let xBodies = Set.map (fun r -> r.body) (Set.filter (fun r -> List.length r.body == 1) xRules) in
 		Set.for_all(fun b -> hasEmpty b || List.for_all (fun sy -> expandsEmpty sy cfg && isVariable sy cfg) b) xBodies
-				
+
 	let rec calcSymExpansions cfg sym seen =
 		let xRules = Set.filter(fun r -> r.head == sym) cfg.rules in
 		let xBodies = Set.toList (Set.map (fun r -> r.body) xRules) in
 		let rec minBody bodies min seen =
 			match bodies with
 			| [] -> (min, seen)
-			| ba :: bb -> 
+			| ba :: bb ->
 				let terminalLength = List.length (List.filter (fun sy -> isTerminalSymbol sy cfg) ba) in
 				let nonTerms = List.filter (fun sy -> isVariable sy cfg && sy != sym) ba in
 				let sameSymLength = List.length (List.filter (fun sy -> sy == sym) ba) in
@@ -274,7 +477,7 @@ struct
 							let (ntValue, newNonTermSeen) = expandNonTerms sb newSymSeen2 in
 							let unionSeen = Set.unionUnsafe newSymSeen2 newNonTermSeen in
 							(saValue + ntValue, unionSeen)
-						)					
+						)
 				in
 				let (value, newSeen) = expandNonTerms nonTerms seen in
 				if (sameSymLength != 0) then
@@ -302,7 +505,7 @@ struct
 							(minVal, newSeen)
 					)
 				)
-				
+
 			in
 			let (minValue, newSeen) = minBody xBodies (Int.max_int) seen in
 			(sym, minValue, newSeen)
@@ -314,11 +517,11 @@ struct
 		let rec buildPairs vars seen =
 			match vars with
 			| [] -> []
-			| va :: vb -> 
+			| va :: vb ->
 				if not (Set.exists(fun (sy, value) -> sy == va) seen)
 					then
 						let (_, minValue, newSeen) = calcSymExpansions cfg va seen in
-						let newSeen2 = Set.add (va, minValue) newSeen in 
+						let newSeen2 = Set.add (va, minValue) newSeen in
 						(va, minValue) :: buildPairs vb newSeen2
 				else (
 					let pair = Set.find(fun (sy, value) -> sy == va) seen in
@@ -326,7 +529,7 @@ struct
 					)
 		in
 		buildPairs vars seen
-	
+
 	let verifyLength2 cfg sf body len pairs =
 		let terminalLengthSf = List.length (List.filter(fun sy -> isTerminalSymbol sy cfg) sf) in
 		let terminalLengthBody = List.length (List.filter(fun sy -> isTerminalSymbol sy cfg) body) in
@@ -337,15 +540,15 @@ struct
 				let (_, value) = List.find(fun (sy, value) -> sy == sa) pairs in
 				value + sumMinExpansions sb
 		in
-		let sfVars = List.filter(fun sy -> isVariable sy cfg) sf in 
+		let sfVars = List.filter(fun sy -> isVariable sy cfg) sf in
 		let bodyVars = List.filter(fun sy -> isVariable sy cfg) body in
 		terminalLengthSf + terminalLengthBody + (sumMinExpansions sfVars) + (sumMinExpansions bodyVars) - 1 <= len
-	
+
 
 	let verifyLength cfg sf body len =
 		let lengthSf = List.length (sf) in
 		let lengthBody = List.length (body) in
-		let sfVars = List.length (List.filter(fun sy -> isVariable sy cfg && expandsEmpty sy cfg) sf) in 
+		let sfVars = List.length (List.filter(fun sy -> isVariable sy cfg && expandsEmpty sy cfg) sf) in
 		let bodyVars = List.length (List.filter(fun sy -> isVariable sy cfg && expandsEmpty sy cfg) body) in
 		lengthSf + lengthBody - sfVars - bodyVars - 1 <= len
 
@@ -353,7 +556,7 @@ struct
 		(*
 			4
 			2 -> 5
-			2 -> 4	 
+			2 -> 4
 		*)
 
 	let initialConfig (cfg: t) (w: word) : configurations =
@@ -385,44 +588,103 @@ struct
 						let xBodies = Set.map (fun r -> r.body) (Set.filter(fun r -> hasEmpty r.body || verifyLength cfg sf r.body len) xRules) in
 						let res = Set.flatMap (fun (fs1, w) -> Set.map (fun fs2 -> (fs2@fs1, w)) xBodies) ySet in
 						res
-				
+
 		(* 0P1, 0P1*)
 		(* *)
 
 
 	let nextConfigs (cfg: t) (sf, w) : configurations =
-		Util.show("Starting nextConfigs for: "^word2str sf);
 		let res = expand cfg (sf,w) in
-			Set.iter(fun (sf, w) -> Util.show("[" ^ word2str sf ^ "," ^ word2str w ^ "]")) res;
 			res
 
 	let nextConfigs2 (cfg: t) (len: int) (sf, w) : configurations =
-		Util.show("Starting nextConfigs for: "^word2str sf);
 		let res = expandGenerate cfg len (sf,w) in
-			Set.iter(fun (sf, w) -> Util.show("[" ^ word2str sf ^ "," ^ word2str w ^ "]")) res;
 			res
 
-		
+
 
 	let isAcceptingConfig (cfg: t) (rl, w) : bool =
 		rl = w
 
-	
+
 	let accept (cfg: t) (w: word) : bool =
-			Model.accept cfg w initialConfig nextConfigs isAcceptingConfig
-		
+		Model.accept cfg w initialConfig nextConfigs isAcceptingConfig
+
 	let acceptFull (cfg: t) (w: word) : bool * path * trail =
-			Model.acceptFull cfg w initialConfig nextConfigs isAcceptingConfig
-	
+		Model.acceptFull cfg w initialConfig nextConfigs isAcceptingConfig
+
 	let isAcceptingConfig2 (cfg: t) (sf, w) : bool =
 		List.for_all(fun sym -> isTerminalSymbol sym cfg) sf
-	
-	
+
+(* Pedro Carlos*)
+(* VER! o que faz?  gram->cfg
+      teste desta função -> ver gram_example4!!! *)
+	let find_applied_rules (gram: t) (path: path) : (word * rule list * int list) list =
+		(* For each configuration in the path, identify applicable rules *)
+		let rec starts_with sub main =
+			match sub, main with
+			| [], _ -> true (* An empty list is a prefix of any list *)
+			| _, [] -> false (* 'main' list ended before 'sub' list did *)
+			| h_sub :: t_sub, h_main :: t_main ->
+					if h_sub = h_main then
+						starts_with t_sub t_main (* Heads match, check the tails *)
+					else
+						false (* Heads don't match *)
+		in
+		(* Main function: Checks if 'sub' is a contiguous sublist of 'main' *)
+		let rec is_sublist sub main =
+			match sub with
+			| [] -> true (* An empty list is always a sublist *)
+			| _ -> (* 'sub' is not empty *)
+					match main with
+					| [] -> false (* 'main' is empty, non-empty 'sub' cannot be a sublist *)
+					| _ :: t_main ->
+							if starts_with sub main then
+								true (* Found 'sub' starting at the current position *)
+							else
+								is_sublist sub t_main (* Try starting from the next element of 'main' *)
+		in
+		List.mapi (fun i config ->
+			if i < (List.length path) - 1 then begin
+				let (sf, w) = config in
+				let (sf_next, w_next) = List.nth path (i + 1) in
+
+				(* Find variables in the sentential form and their positions *)
+				let var_positions = ref [] in
+				List.iteri (fun i sym ->
+					if Set.belongs sym gram.variables then
+						var_positions := (i, sym) :: !var_positions
+				) sf;
+				let var_positions = List.rev !var_positions in
+
+				(* For each variable, find all applicable rules *)
+				let all_rules = ref [] in
+				let all_positions = ref [] in
+
+				List.iter (fun (i, var) ->
+					let var_rules = Set.filter (fun r -> r.head = var) gram.rules in
+					print_endline ("Variable: " ^ symb2str var);
+					Set.iter (fun rule ->
+						if is_sublist rule.body sf_next then begin
+							all_rules := rule :: !all_rules;
+							all_positions := i :: !all_positions
+						end
+					) var_rules
+				) var_positions;
+
+				(* Return the configuration along with applicable rules and their positions *)
+				(* let variables_only = List.filter (fun sym -> Set.belongs sym gram.variables) sf in *)
+				(sf, List.rev !all_rules, List.rev !all_positions)
+			end else begin
+				([], [], [])
+			end
+		) path
+
 
 	let getWord (sf, _) = List.filter (fun symb -> isTerminalSymbol2 symb) sf
 
 	let generate (cfg: t) (len: int) : words =
-		
+
 		Model.generate cfg len initialConfig nextConfigs2 isAcceptingConfig2 getWord
 
 
@@ -436,6 +698,8 @@ module ContextFreeGrammarBasic =
 struct
 	include ContextFreeGrammarSupport
 	open ContextFreeGrammarPrivate
+	open ContextFreeGrammarAccept
+	open ContextFreeGrammarGenerate
 
 	(* Make *)
 	let make2 (arg: t Arg.alternatives): Entity.t * t = make2 arg validate
@@ -447,15 +711,17 @@ struct
 		| "regular" -> false (* TODO self#isRegular *)
 		| "context free grammar" -> true
 		| _ -> Model.checkProperty prop
-	let checkExercise ex re = Model.checkExercise ex (accept re) (checkProperty re)	
-	let checkExerciseFailures ex re = Model.checkExerciseFailures ex (accept re) (checkProperty re)	
+	let checkExercise ex re = Model.checkExercise ex (accept re) (checkProperty re)
+	let checkExerciseFailures ex re = Model.checkExerciseFailures ex (accept re) (checkProperty re)
 
 	(* Ops *)
 	let lookahead = lookahead
 	let follow = follow
 	let first = first
 	let accept = accept
-	let generate = generate	
+	let acceptFull = acceptFull
+	let generate = generate
+	let parseTree = ContextFreeGrammarParseTree.parseTree
 
 	class model (arg: t Arg.alternatives) =
 		object(self) inherit Model.model (make2 arg) as super
@@ -465,7 +731,7 @@ struct
 		(* Kind *)
 			method isContextGrammar : bool = true
 			method isContextFreeGrammar : bool = true
-		(* Show *)			
+		(* Show *)
 			method toJSon: JSon.t = toJSon representation
 			method toJSon2: JSon.t = toJSon2 id representation
 			method show: unit = show representation
@@ -519,8 +785,12 @@ struct
 			method accept (testWord:word) : bool =
 				ChomskyNormalForm.accept (self#representation) testWord
 
-				method acceptFull (w: word) : bool * path * trail = acceptFull representation w
-				
+			method acceptFull (w: word) : bool * path * trail = acceptFull representation w
+
+			(* PEDRO CARLOS *)
+			method find_applied_rules (path: path) : (word * rule list * int list) list =
+				ContextFreeGrammarAcceptJP.find_applied_rules representation path
+
 			method private acceptXXX (testWord:word) : bool =
 
 				(* any word with a symbol not from the cfg alphabet will not be accepted
@@ -740,21 +1010,21 @@ struct
 
 	let cfgI cfg = internalize cfg
 	let cfgX cfg = externalize cfg
-	
+	let ptX pt = externalizeParseTree pt
+
 	let cfg_load file = cfgX (make (Arg.File file))
 	let cfg_text text = cfgX (make (Arg.Text text))
 	let cfg_json json = cfgX (make (Arg.JSon json))
 	let cfg_predef name = cfg_text (Examples.example name)
 
-(*	let confX (s, w) = (state2str s, word2str w)
+	let confX (sf, w) = (word2str sf, word2str w)
 	let pathX (p: path) = pathX confX p
-	let trailX (t: trail) = trailX confX t *)
-	
+	let trailX (t: trail) = trailX confX t
+
 	let stats () = RuntimeControl.stats ()
 
 	let cfg_accept cfg w = accept (cfgI cfg) (wordI w)
 
-(*
 	let cfg_path cfg w =
 		let (r,p,t) = acceptFull (cfgI cfg) (wordI w) in
 			pathX p
@@ -762,10 +1032,28 @@ struct
 	let cfg_trail cfg w =
 		let (r,p,t) = acceptFull (cfgI cfg) (wordI w) in
 			trailX t
-		*)
+
+	let cfg_parse_tree cfg w =
+		let pt = parseTree (cfgI cfg) (wordI w) in
+			ptX pt
 
 	let cfg_generate cfg len = wordsX (generate (cfgI cfg) len)
 end
+
+
+
+(*
+
+examples;;
+open ContextFreeGrammarSupport;;
+open ContextFreeGrammarBasicsX;;
+let g = cfg_predef "cfg_balanced";;
+let w = "[[][]]";;
+cfg_accept g w;;
+cfg_path g w;;
+cfg_parse_tree g w;;
+
+*)
 
 open ContextFreeGrammarTop
 

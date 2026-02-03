@@ -77,6 +77,8 @@ sig
 	val (-->) : symbol -> string -> rule
 	val rule2str : rule -> string
 	val showRules : rules -> unit
+	val showConfigurations : configurations -> unit
+
 end
 
 module ContextFreeGrammarSyntax: ContextFreeGrammarSyntaxSig =
@@ -158,6 +160,14 @@ struct
 
 	let showRules rs =
 		Util.println [toString rs]
+
+    let configurations2str (cs: configurations): string =
+        let m = Set.map (fun (sf, w) ->
+            "(" ^ word2str sf ^ "," ^ word2str w ^ ")") cs in
+        String.concat ", " (Set.toList m)
+
+    let showConfigurations (cs: configurations): unit =
+        Util.show(configurations2str cs)
 end
 
 module ContextFreeGrammarConversions =
@@ -227,6 +237,9 @@ struct
 		initial = symbI cfg.initial;
 		rules = ContextFreeGrammarSyntax.parse (Set.make cfg.rules)
 	}
+    type cfgTreeX =
+         LeafX of string
+        | RootX of string * cfgTreeX list
 
 	let externalize (cfg: t): tx = {
 		alphabet = symbolsX cfg.alphabet;
@@ -234,6 +247,11 @@ struct
 		initial = symbX cfg.initial;
 		rules = ContextFreeGrammarSyntax.toStringList cfg.rules
 	}
+
+	let rec externalizeParseTree (pt: cfgTree): cfgTreeX =
+        match pt with
+            | Leaf sy -> LeafX (symb2str sy)
+            | Root (sy, l) -> RootX (symb2str sy, List.map (fun pt -> externalizeParseTree pt) l)
 end
 
 module ContextFreeGrammarLearnOCaml =
