@@ -346,34 +346,34 @@ struct
 		| (a,_)::(b,bb)::ps ->
 			(sfFindPermutation cfg a b)::rulesSequence cfg ((b,bb)::ps)
 
-	let rec makeTree (cfg: t) (v: variable) (rss: rule list list): cfgTree =
-		match rss with
-		| rs::rss ->
-			let rs = ref rs in
-			let next () =
-				match !rs with
-				| x::xs -> rs := xs; x
-				| [] -> failwith "makeTree 1"
-			in
-				Root (v,
-					List.map
-						( fun sy ->
-							if isVariable cfg sy then
-								makeTree cfg sy rss
-							else
-								Leaf sy
-						)
-						((next ()).body)
-				)
-		| [] -> failwith "makeTree 2"
+	let rec makeTree (cfg: t) (rss: rule list list): cfgTree =
+    		match rss with
+    		| (r::_)::rs::rss ->
+    			let zs = ref rs in
+    			let next () = (
+    				let res = !zs in
+    					zs := List.tl !zs;
+    					res
+    			) in
+    				Root (r.head,
+    					List.map
+    						( fun sy ->
+    							if isVariable cfg sy then
+    								makeTree cfg (next ()::rss)
+    							else
+    								Leaf sy
+    						)
+    						r.body
+    				)
+    		| _ -> failwith "makeTree"
 
 	let parseTree (cfg: t) (w: word): cfgTree =
-		let (r,p,_) = acceptFull cfg w in
-			if r then
-				let rss = rulesSequence cfg p in
-					makeTree cfg (cfg.initial) rss
-			else
-				Leaf error
+    		let (r,p,_) = acceptFull cfg w in
+    			if r then
+    				let rss = rulesSequence cfg p in
+    					makeTree cfg (rss@[[]])
+    			else
+    				Leaf error
 end
 
 module ContextFreeGrammarGenerate = (* AMD *)

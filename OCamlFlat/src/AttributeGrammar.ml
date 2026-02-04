@@ -878,17 +878,24 @@
           ]
         } |}
 
+        (*TODO: Testar com uma gramática mais composta *)
+        (*Arranjar mais exemplos + os do professor luis monteiro
+        Uma gramatica que uma arvore seja feita para "chatear"
+        depois do parsing em que o outup é basic -> tranformar em AG
+        Bonus: 10 exercicios praticos para os alunos*)
+
         let cyc_ag = {| {
           kind : "attribute grammar",
           description : "deliberate cycle",
           name : "cyc_ag",
           alphabet : ["a"],
-          variables : ["S"],
+          variables : ["S","F"],
           inherited : [""],
           synthesized : ["v"],
           initial : "S",
           rules : [
-            "S -> S { v(S0) = v(S0) }"
+            "S -> F { v(S0) = v(F0) }",
+            "F -> S { v(F0) = v(S0) }"
           ]
         } |}
 
