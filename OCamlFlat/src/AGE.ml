@@ -107,3 +107,139 @@ let pt3 =
               Leaf (e "~")
             ])
         ])
+
+let ag4 = {| {
+  kind : "attribute grammar",
+  description : "boolean + boolean should fail at evaluation",
+  name : "ag_bool_plus",
+  alphabet : ["x","y","+"],
+  variables : ["S","A","B"],
+  inherited : [""],
+  synthesized : ["v"],
+  initial : "S",
+  rules : [
+    "S -> A B { v(S) = v(A) + v(B) }",
+    "A -> x { v(A) = T }",
+    "B -> y { v(B) = F }"
+  ]
+} |}
+
+let pt4 =
+  Node (e "S", [
+    Node (e "A", [ Leaf (e "x") ]);
+    Node (e "B", [ Leaf (e "y") ])
+  ])
+
+let ag5 = {| {
+  kind : "attribute grammar",
+  description : "LHS head must be synthesized, not inherited",
+  name : "ag_head_inh_lhs",
+  alphabet : ["a"],
+  variables : ["S","F"],
+  inherited : ["d"],
+  synthesized : ["v"],
+  initial : "S",
+  rules : [
+    "S -> F { d(S) = v(F) }",
+    "F -> a { v(F) = 1 }"
+  ]
+} |}
+
+let ag7 = {| {
+      kind : "attribute grammar",
+      description : "default child index + explicit C1/C2 occurrences",
+      name : "ag_default_index",
+      alphabet : ["n","m"],
+      variables : ["S","C"],
+      inherited : ["d"],
+      synthesized : ["v"],
+      initial : "S",
+      rules : [
+        "S -> C C { d(C) = 1 ; d(C2) = 3 ; v(S) = v(C1) + v(C2) }",
+        "C -> n { v(C) = d(C) }",
+        "C -> m { v(C) = d(C) }"
+      ]
+    } |}
+
+let pt7 =
+  Node (e "S", [
+    Node (e "C", [ Leaf (e "n") ]);
+    Node (e "C", [ Leaf (e "m") ])
+  ])
+
+
+let ag8 = {| {
+          kind : "attribute grammar",
+          description : "boolean flags",
+          name : "ag_boolean_flags",
+          alphabet : ["x","y"],
+          variables : ["S","A","B"],
+          inherited : [""],
+          synthesized : ["v"],
+          initial : "S",
+          rules : [
+            "S -> A B { v(S) = v(A) = v(B) }",
+            "A -> x { v(A) = T }",
+            "A -> y { v(A) = F }",
+            "B -> x { v(B) = T }",
+            "B -> y { v(B) = F }"
+          ]
+        } |}
+
+let pt8 =
+  Node (e "S", [
+    Node (e "A", [ Leaf (e "x") ]);
+    Node (e "B", [ Leaf (e "y") ])
+  ])
+
+
+
+let ag9 = {| {
+        kind : "attribute grammar",
+        description : "compute length of a list of items",
+        name : "ag_list_length",
+        alphabet : ["a",","],
+        variables : ["L","I"],
+        inherited : [""],
+        synthesized : ["v"],
+        initial : "L",
+        rules : [
+          "L -> L , I { v(L0) = v(L1) + v(I) }",
+          "L -> I { v(L) = v(I) }",
+          "I -> a { v(I) = 1 }"
+        ]
+      } |}
+
+let rec make_list n =
+          if n = 1 then
+            Node (e "L", [ Node (e "I", [ Leaf (e "a") ]) ])
+          else
+            Node (e "L", [
+              make_list (n - 1);
+              Leaf (e ",");
+              Node (e "I", [ Leaf (e "a") ])
+            ])
+
+let pt9 = make_list 30
+
+let ag10 = {| {
+            kind : "attribute grammar",
+            description : "inherited default index and synthesized result",
+            name : "ag_inherited_default",
+            alphabet : ["n","m"],
+            variables : ["S","C","F"],
+            inherited : ["d"],
+            synthesized : ["v"],
+            initial : "S",
+            rules : [
+              "S -> C F { d(C) = 0; d(F) = 0 ; v(S) = v(C) + v(F) }",
+              "C -> n { v(C) = d(C) + 1 }",
+              "F -> m { v(F) = d(F) + 2 }"
+            ]
+          } |}
+
+let pt10 =
+        Node (e "S", [
+          Node (e "C", [ Leaf (e "n") ]);
+          Node (e "F", [ Leaf (e "m") ])
+        ])
