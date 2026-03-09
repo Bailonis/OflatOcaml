@@ -43,6 +43,7 @@ NAMES =		OCamlFlat Configuration Error 	\
 											\
 			AttributeGrammarSupport			\
 			AttributeGrammar				\
+			AttributeGrammarSupportTests    \
 											\
 			PushdownAutomatonSupport		\
 			PushdownAutomaton				\
