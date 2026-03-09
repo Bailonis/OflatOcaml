@@ -124,9 +124,11 @@ struct
 	and parseExp2 (): expression =
 		let l = parseExp3 () in
 		let c = peek () in
-			if c = '*' then (
+			if c = '*' || c = '/' then (
+			    let op =
+			        if c = '*' then "*" else "/" in
 				skip();
-				Expr ("*", l, parseExp2 ())
+				Expr (op, l, parseExp2 ())
 			)
 			else
 				l
@@ -134,9 +136,11 @@ struct
 	and parseExp1 (): expression =
 		let l = parseExp2 () in
 		let c = peek () in
-			if c = '+' then (
+			if c = '+' || c = '-' then (
+			    let op =
+			        if c = '+' then "+" else "-" in
 				skip();
-				Expr ("+", l, parseExp1 ())
+				Expr (op, l, parseExp1 ())
 			)
 			else
 				l

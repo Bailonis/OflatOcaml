@@ -104,6 +104,7 @@ struct
 	let epsilon: symbol = symb "~" (* used for representing the empty transitions *)
 	let dollar: symbol = symb "$"
 	let empty: symbol = symb "B"
+	let error: symbol = symb "$$_ERROR_$$"
 
 	let str2symbX (s: string): symbolX = symbX (str2symb s)
 	let symbX2str (s: symbolX): string = symb2str (symbI s)
@@ -161,6 +162,9 @@ struct
 			String.concat "" strs
 		
 	let symbols (s: string): symbols = Set.make (word s)
+
+	let wordClear (w: word): word =
+         List.filter (fun s -> s <> epsilon) w
 
 	(* Internalize/Externalize *)
 	let wordI = str2word

@@ -50,6 +50,13 @@
 			let counter = howMany r.body v in
 				counter >= i
 
+
+        let ty_of_attr (attr : attribute) : string =
+          match BasicTypes.symb2str attr with
+          | "s" -> "string"
+          | "b" -> "bool"
+          | _ -> "int"
+
 		let rec validateExp (name: string) (ag: t) (r: rule) (e: expression) : string =
             let attr_exists attr =
             Set.belongs attr (Set.union ag.synthesized ag.inherited)
@@ -66,7 +73,7 @@
             | Apply (attr, (var, i)) ->
               if attr_exists attr then
                 if vars_exists var then
-                  if validateAttrArg ag r attr (var, i) then "int"
+                  if validateAttrArg ag r attr (var, i) then ty_of_attr attr
                   else Error.error name  "Invalid attribute argument" "error"
                 else  Error.error name  "Variable not found" "error"
               else Error.error name  "Attribute not found" "error"
@@ -799,165 +806,4 @@
         let has_cycles = has_cycles
         let generate ?max_depth ?max_words = generate ?max_depth ?max_words
 
-	end
-
-	module AttributeGrammarTop =
-	struct
-		open AttributeGrammar
-	end
-
-	open AttributeGrammarTop
-
-	module AttributeGrammarSupportTests : sig end =
-	struct
-		open AttributeGrammar
-		open AttributeGrammarPrivate
-
-		let active = true
-        let e s = (symb s, Set.empty);;
-
-        let ag1 = {| {
-                        kind : "attribute grammar",
-                        description : "",
-                        name : "ag1",
-                        alphabet : ["0","1","2","3","4","5","6","7","8","9","+"],
-                        variables : ["S","E","F"],
-                        inherited : [""],
-                        synthesized : ["v"],
-                        initial : "S",
-                        rules : [ "S -> E {v(S) = v(E)}",
-                                    "E -> E + F {v(E0) = v(E1) + v(F)}",
-                                    "E -> F {v(E) = v(F)}",
-                                    "F -> 0 {v(F) = 0}",
-                                    "F -> 1 {v(F) = 1}",
-                                    "F -> 2 {v(F) = 2}",
-                                    "F -> 3 {v(F) = 3}",
-                                    "F -> 4 {v(F) = 4}",
-                                    "F -> 5 {v(F) = 5}",
-                                    "F -> 6 {v(F) = 6}",
-                                    "F -> 7 {v(F) = 7}",
-                                    "F -> 8 {v(F) = 8}",
-                                    "F -> 9 {v(F) = 9}"
-                                    ]
-                        } |}
-
-        let pt1 =
-                        Node (e "S", [
-                            Node (e "E", [
-                                 Node (e "E", [
-                                     Node (e "F", [
-                                          Leaf (e "3")
-                                    ])
-                                ]);
-                                Leaf (e "+");
-                                Node (e "F", [
-                                    Leaf (e "2")
-                                ])
-                          ] )
-                        ])
-
-        let pt3 =
-               Node (e "S", [
-                   Node (e "E", [
-                     Leaf (e "~")
-                   ])
-               ])
-
-        let ok_ag = {| {
-          kind : "attribute grammar",
-          description : "acyclic sanity",
-          name : "ok_ag",
-          alphabet : ["a","+"],
-          variables : ["S","F"],
-          inherited : [""],
-          synthesized : ["v"],
-          initial : "S",
-          rules : [
-            "S -> F { v(S) = v(F) }",
-            "F -> a { v(F) = 1 }"
-          ]
-        } |}
-
-        let cyc_ag = {| {
-          kind : "attribute grammar",
-          description : "deliberate cycle",
-          name : "cyc_ag",
-          alphabet : ["a"],
-          variables : ["S"],
-          inherited : [""],
-          synthesized : ["v"],
-          initial : "S",
-          rules : [
-            "S -> S { v(S0) = v(S0) }"
-          ]
-        } |}
-
-        let test_has_cycles_ok () =
-          Util.header "has_cycles_ok";
-          let g = AttributeGrammarSupport.fromJSon (JSon.parse ok_ag) in
-          let r = has_cycles g in
-          Printf.printf "has_cycles(ok_ag) = %b (expected false)\n" r
-
-        let test_has_cycles_detected () =
-          Util.header "has_cycles_detected";
-          let g = AttributeGrammarSupport.fromJSon (JSon.parse cyc_ag) in
-          let r = has_cycles g in
-          Printf.printf "has_cycles(cyc_ag) = %b (expected true)\n" r
-
-		let test0 () =
-			let j = JSon.parse ag1 in
-			let g = fromJSon j in
-			let h = toJSon g in
-				JSon.show h
-
-		let test1 () =
-		    Util.header "test1";
-			let g = make (Arg.Text ag1) in
-			let newTree = calcAttributes g pt1 in
-			Printf.printf "Final parse tree:\n";
-			print_parse_tree newTree
-
-        let test_accept_with_tree_ok () =
-          Util.header "test_accept_with_tree_ok";
-          let g = make (Arg.Text ag1) in
-          let ok = accept_ag_with_tree g pt3 in
-          Printf.printf "accept_ag_with_tree(pt1) = %b\n" ok
-
-        let test_accept_words () =
-          Util.header "test_accept_words";
-          let g = AttributeGrammar.make (Arg.Text ag1) in
-
-          let cfg : ContextFreeGrammarBasic.t =
-            AttributeGrammarPrivate.ga_to_cfg g
-          in
-          let sym = BasicTypes.str2symb in
-          let three = sym "9" and star = sym "-" and two = sym "2" in
-          let w = [three; star; two] in
-
-          let r = ContextFreeGrammarBasic.accept cfg w in
-          Printf.printf "AG->CFG.accept %s = %b\n"
-            (BasicTypes.word2str w) r
-
-        let generate_words () =
-          Util.header "test_generate_words";
-          let g = AttributeGrammar.make (Arg.Text ag1) in
-          let words = AttributeGrammar.generate ~max_depth:5 ~max_words:100 g in
-          Printf.printf "generate: produced %d words (max_depth=5, max_words=10)\n"
-            (List.length words);
-          (* Pretty-print the results *)
-          List.iter
-            (fun w -> Printf.printf "  %s\n" (BasicTypes.word2str w))
-            words
-        ;;
-
-        let runAll =
-          if Util.testing active "AttributeGrammarSupport" then begin
-
-            test1 ();
-            (*test_accept_with_tree_ok ();*)
-            (*generate_words ();*)
-            (*test_accept_words ();*)
-            test_has_cycles_ok ();
-            test_has_cycles_detected ();
-          end
 	end
