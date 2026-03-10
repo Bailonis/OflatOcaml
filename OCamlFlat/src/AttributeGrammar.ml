@@ -40,15 +40,19 @@
 	struct
 		open AttributeGrammarSupport
 
+        let normalize_default_index (head_sym: symbol) (var: symbol) (i: int): int =
+                  if i = -1 && var = head_sym then 0 else i
+
 		let howMany (body: word) (v: variable) =
 			List.length (List.filter (fun x-> x = v) body)
 
-		let validateAttrArg (ag:t) (r:rule) (attr: attribute) (v,i) =
-			if i = 0 then
-				r.head = v && Set.belongs attr (Set.union ag.synthesized ag.inherited)
-		else
-			let counter = howMany r.body v in
-				counter >= i
+        let validateAttrArg (ag:t) (r:rule) (attr: attribute) (v,i) =
+          let i' = normalize_default_index r.head v i in
+          if i' = 0 then
+            r.head = v && Set.belongs attr (Set.union ag.synthesized ag.inherited)
+          else
+            let counter = howMany r.body v in
+            counter >= i'
 
 
         let ty_of_attr (attr : attribute) : string =
@@ -92,14 +96,10 @@
                 | "*", _ -> Error.error name "Invalid types for *" "error"
                 | "/", "int" -> "int"
                 | "/", _ -> Error.error name "Invalid types for /" "error"
-                | ("=" | "<>"), _ -> "bool"               (* same-type equality already ensured *)
+                | ("=" | "<>"), _ -> "bool"
                 | ("<" | "<=" | ">" | ">="), ("int" | "string") -> "bool"
                 | ("<" | "<=" | ">" | ">="), _ -> Error.error name "Invalid types for comparison" "error"
                 | _ -> Error.error name "Unknown operator" "error"
-
-
-        let normalize_default_index (head_sym: symbol) (var: symbol) (i: int): int =
-                  if i = -1 && var = head_sym then 0 else i
 
 		let occurs_in_body (r: rule) (v: symbol) : int =
           List.length (List.filter (fun x -> x = v) r.body)
@@ -666,12 +666,6 @@
             ) cfg.rules : AttributeGrammarSupport.rules); (* Correct placement of type annotation *)
           }
 
-         let validate (name: string) (rep: t): unit =
-                   let cfg = ga_to_cfg rep in
-                   ContextFreeGrammarPrivate.validate name cfg;
-                   validateEquations name rep;
-                   validateConditions name rep
-
 		let accept (ag: t) (w: word): bool =
           let cfg = ga_to_cfg ag in
           ContextFreeGrammarBasic.accept cfg w
@@ -781,6 +775,13 @@
         let has_cycles (ag : t) : bool =
           ag |> build_dep_graph |> has_cycle_graph
 
+        let validate (name: string) (rep: t): unit =
+           let cfg = ga_to_cfg rep in
+           ContextFreeGrammarPrivate.validate name cfg;
+           validateEquations name rep;
+           validateConditions name rep;
+           if has_cycles rep then
+           Error.error name "Attribute dependency cycle detected" ()
       end
 
 	module AttributeGrammar =

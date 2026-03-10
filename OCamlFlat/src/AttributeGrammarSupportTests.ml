@@ -1,3 +1,32 @@
+(*
+ * AttributeGrammarSupportTests.ml
+ *
+ * This file is part of the OCamlFLAT library
+ *
+ * LEAFS project (partially supported by the OCaml Software Foundation) [2020/21]
+ * FACTOR project (partially supported by the Tezos Foundation) [2019/20]
+ *
+ * NOVA LINCS - NOVA Laboratory for Computer Science and Informatics
+ * Dept. de Informatica, FCT, Universidade Nova de Lisboa.
+ *
+ * This software is distributed under the terms of the GPLv3 license.
+ * See the included LICENSE file for details.
+ *
+ *  Written by Pedro Bailão (pb)
+ *)
+
+(*
+ * ChangeLog:
+ *
+ * mar/2026 (pb) - create module.
+
+ *)
+
+(*
+ * Description: Attribute grammar tests.
+ *
+ *
+ *)
 module AttributeGrammarSupportTests : sig end =
 	struct
 		open AttributeGrammar
@@ -552,6 +581,11 @@ module AttributeGrammarSupportTests : sig end =
                 ])
               ])
 
+        let test_ validate () =
+             Util.header "test validate";
+             let g = AttributeGrammarSupport.fromJSon (JSon.parse ag_expr_ext) in
+             validate "test validate" g
+
         let test_ag_expr_ext () =
               Util.header "ag_expr_ext";
               let g = AttributeGrammar.make (Arg.Text ag_expr_ext) in
@@ -587,9 +621,10 @@ module AttributeGrammarSupportTests : sig end =
                 (*test_accept_with_tree_ok ();*)
                 (*generate_words ();*)
                 (*test_accept_words ();*)
-                (*test_has_cycles_ok ();*)
-                (*test_has_cycles_detected ();*)
+                test_has_cycles_ok ();
+                test_has_cycles_detected ();
                 test_ag_expr_ext ()
+                test_ validate ()
 
               end
 	end

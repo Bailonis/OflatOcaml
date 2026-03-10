@@ -13043,15 +13043,19 @@ end
 	struct
 		open AttributeGrammarSupport
 
+        let normalize_default_index (head_sym: symbol) (var: symbol) (i: int): int =
+                  if i = -1 && var = head_sym then 0 else i
+
 		let howMany (body: word) (v: variable) =
 			List.length (List.filter (fun x-> x = v) body)
 
-		let validateAttrArg (ag:t) (r:rule) (attr: attribute) (v,i) =
-			if i = 0 then
-				r.head = v && Set.belongs attr (Set.union ag.synthesized ag.inherited)
-		else
-			let counter = howMany r.body v in
-				counter >= i
+        let validateAttrArg (ag:t) (r:rule) (attr: attribute) (v,i) =
+          let i' = normalize_default_index r.head v i in
+          if i' = 0 then
+            r.head = v && Set.belongs attr (Set.union ag.synthesized ag.inherited)
+          else
+            let counter = howMany r.body v in
+            counter >= i'
 
 
         let ty_of_attr (attr : attribute) : string =
@@ -13095,14 +13099,10 @@ end
                 | "*", _ -> Error.error name "Invalid types for *" "error"
                 | "/", "int" -> "int"
                 | "/", _ -> Error.error name "Invalid types for /" "error"
-                | ("=" | "<>"), _ -> "bool"               (* same-type equality already ensured *)
+                | ("=" | "<>"), _ -> "bool"
                 | ("<" | "<=" | ">" | ">="), ("int" | "string") -> "bool"
                 | ("<" | "<=" | ">" | ">="), _ -> Error.error name "Invalid types for comparison" "error"
                 | _ -> Error.error name "Unknown operator" "error"
-
-
-        let normalize_default_index (head_sym: symbol) (var: symbol) (i: int): int =
-                  if i = -1 && var = head_sym then 0 else i
 
 		let occurs_in_body (r: rule) (v: symbol) : int =
           List.length (List.filter (fun x -> x = v) r.body)
@@ -13669,12 +13669,6 @@ end
             ) cfg.rules : AttributeGrammarSupport.rules); (* Correct placement of type annotation *)
           }
 
-         let validate (name: string) (rep: t): unit =
-                   let cfg = ga_to_cfg rep in
-                   ContextFreeGrammarPrivate.validate name cfg;
-                   validateEquations name rep;
-                   validateConditions name rep
-
 		let accept (ag: t) (w: word): bool =
           let cfg = ga_to_cfg ag in
           ContextFreeGrammarBasic.accept cfg w
@@ -13784,6 +13778,13 @@ end
         let has_cycles (ag : t) : bool =
           ag |> build_dep_graph |> has_cycle_graph
 
+        let validate (name: string) (rep: t): unit =
+           let cfg = ga_to_cfg rep in
+           ContextFreeGrammarPrivate.validate name cfg;
+           validateEquations name rep;
+           validateConditions name rep;
+           if has_cycles rep then
+           Error.error name "Attribute dependency cycle detected" ()
       end
 
 	module AttributeGrammar =
@@ -13811,6 +13812,35 @@ end
 
 	end
 # 1 "src/AttributeGrammarSupportTests.ml"
+(*
+ * AttributeGrammarSupportTests.ml
+ *
+ * This file is part of the OCamlFLAT library
+ *
+ * LEAFS project (partially supported by the OCaml Software Foundation) [2020/21]
+ * FACTOR project (partially supported by the Tezos Foundation) [2019/20]
+ *
+ * NOVA LINCS - NOVA Laboratory for Computer Science and Informatics
+ * Dept. de Informatica, FCT, Universidade Nova de Lisboa.
+ *
+ * This software is distributed under the terms of the GPLv3 license.
+ * See the included LICENSE file for details.
+ *
+ *  Written by Pedro Bailão (pb)
+ *)
+
+(*
+ * ChangeLog:
+ *
+ * mar/2026 (pb) - create module.
+
+ *)
+
+(*
+ * Description: Attribute grammar tests.
+ *
+ *
+ *)
 module AttributeGrammarSupportTests : sig end =
 	struct
 		open AttributeGrammar
@@ -14365,6 +14395,11 @@ module AttributeGrammarSupportTests : sig end =
                 ])
               ])
 
+        let test_ validate () =
+             Util.header "test validate";
+             let g = AttributeGrammarSupport.fromJSon (JSon.parse ag_expr_ext) in
+             validate "test validate" g
+
         let test_ag_expr_ext () =
               Util.header "ag_expr_ext";
               let g = AttributeGrammar.make (Arg.Text ag_expr_ext) in
@@ -14386,7 +14421,7 @@ module AttributeGrammarSupportTests : sig end =
         let runAll =
               if Util.testing active "AttributeGrammarSupport" then begin
 
-                test_ag1_simple_synthesized ();
+                (*test_ag1_simple_synthesized ();
                 test_ag2_simple_synthesized_and_inherited ();
                 test_ag3_simpler_synthesized_and_inherited ();
                 test_ag4_type_mismatch ();
@@ -14400,9 +14435,10 @@ module AttributeGrammarSupportTests : sig end =
                 (*test_accept_with_tree_ok ();*)
                 (*generate_words ();*)
                 (*test_accept_words ();*)
-                (*test_has_cycles_ok ();*)
-                (*test_has_cycles_detected ();*)
-                test_ag_expr_ext ()
+                test_has_cycles_ok ();
+                test_has_cycles_detected ();
+                test_ag_expr_ext ()*)
+                test_ validate ()
 
               end
 	end
