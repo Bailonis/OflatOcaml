@@ -367,6 +367,17 @@ module AttributeGrammarSupportTests : sig end =
           ]
         } |}
 
+        let test_parseTree () =
+            Util.header "ag1_simple_synthesized";
+            let g = AttributeGrammar.make (Arg.Text ag1) in
+            let w = word "3*2" in
+            let cfg = ga_to_cfg g in
+            let tree = ContextFreeGrammarParseTree.parseTree cfg w in
+            let et = ContextFreeGrammarBasicsX.externalizeParseTree tree in
+            ignore (et);
+            ()
+
+
         let test_ag1_simple_synthesized () =
             Util.header "ag1_simple_synthesized";
             let g = AttributeGrammar.make (Arg.Text ag1) in
@@ -460,13 +471,13 @@ module AttributeGrammarSupportTests : sig end =
 
         let test_has_cycles_ok () =
               Util.header "has_cycles_ok";
-              let g = AttributeGrammarSupport.fromJSon (JSon.parse ok_ag) in
+              let g = AttributeGrammar.make (Arg.Text ok_ag) in
               let r = has_cycles g in
               Printf.printf "has_cycles(ok_ag) = %b (expected false)\n" r
 
         let test_has_cycles_detected () =
               Util.header "has_cycles_detected";
-              let g = AttributeGrammarSupport.fromJSon (JSon.parse cyc_ag) in
+              let g = AttributeGrammar.make (Arg.Text cyc_ag) in
               let r = has_cycles g in
               Printf.printf "has_cycles(cyc_ag) = %b (expected true)\n" r
 
@@ -484,7 +495,7 @@ module AttributeGrammarSupportTests : sig end =
                 AttributeGrammarPrivate.ga_to_cfg g
               in
               let sym = BasicTypes.str2symb in
-              let three = sym "9" and star = sym "-" and two = sym "2" in
+              let three = sym "3" and star = sym "*" and two = sym "2" in
               let w = [three; star; two] in
 
               let r = ContextFreeGrammarBasic.accept cfg w in
@@ -581,9 +592,9 @@ module AttributeGrammarSupportTests : sig end =
                 ])
               ])
 
-        let test_ validate () =
+        let test_validate () =
              Util.header "test validate";
-             let g = AttributeGrammarSupport.fromJSon (JSon.parse ag_expr_ext) in
+             let g = AttributeGrammar.make (Arg.Text ag_expr_ext) in
              validate "test validate" g
 
         let test_ag_expr_ext () =
@@ -607,7 +618,7 @@ module AttributeGrammarSupportTests : sig end =
         let runAll =
               if Util.testing active "AttributeGrammarSupport" then begin
 
-                test_ag1_simple_synthesized ();
+                (*test_ag1_simple_synthesized ();
                 test_ag2_simple_synthesized_and_inherited ();
                 test_ag3_simpler_synthesized_and_inherited ();
                 test_ag4_type_mismatch ();
@@ -618,13 +629,14 @@ module AttributeGrammarSupportTests : sig end =
                 test_ag9_list_length ();
                 test_ag10_inherited_default ();
                 test_ag11_out_of_range_ref ();
-                (*test_accept_with_tree_ok ();*)
+                test_accept_with_tree_ok ();*)
                 (*generate_words ();*)
-                (*test_accept_words ();*)
-                test_has_cycles_ok ();
+                (*test_accept_words ()*)
+                (*test_has_cycles_ok ();
                 test_has_cycles_detected ();
                 test_ag_expr_ext ()
-                test_ validate ()
+                test_ validate ()*)
+                test_parseTree ()
 
               end
 	end

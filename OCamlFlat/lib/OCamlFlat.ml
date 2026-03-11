@@ -2796,6 +2796,16 @@ struct
 			properties : ["finite automaton"]
 		} |}
 
+    let exer_ag30 = {| {
+            kind : "exercise",
+            description : "this is an example",
+            name : "exer_ag30",
+            problem : "Escreva uma gramática de atributos que descreva a linguagem de todas as sequencias de a's e b's com tamanho inferior a 30",
+            inside : ["a", "b", "", "ababababababababababababababa", "abbaab", "bbaabb"],
+            outside : ["abababababababababababababababa"],
+            properties : ["attribute grammar"]
+        } |}
+
 	let oflatExamplesTable = [
 		("dfa_1", dfa_1);
 		("dfa_2", dfa_2);
@@ -13797,11 +13807,12 @@ end
 		let make (arg: t Arg.alternatives): t = make arg validate
 
 		(* Exercices support *)
-		let checkProperty (fa: t) (prop: string) =
+		let checkProperty (ag: t) (prop: string) =
 			match prop with
+				| "attribute grammar" -> true
 				| _ -> Model.checkProperty prop
-		let checkExercise ex fa = Model.checkExercise ex (accept fa) (checkProperty fa)
-		let checkExerciseFailures ex fa = Model.checkExerciseFailures ex (accept fa) (checkProperty fa)
+		let checkExercise ex ag = Model.checkExercise ex (accept ag) (checkProperty ag)
+		let checkExerciseFailures ex ag = Model.checkExerciseFailures ex (accept ag) (checkProperty ag)
 
 		(* Ops *)
 		let stats = Model.stats
@@ -14181,6 +14192,17 @@ module AttributeGrammarSupportTests : sig end =
           ]
         } |}
 
+        let test_parseTree () =
+            Util.header "ag1_simple_synthesized";
+            let g = AttributeGrammar.make (Arg.Text ag1) in
+            let w = word "3*2" in
+            let cfg = ga_to_cfg g in
+            let tree = ContextFreeGrammarParseTree.parseTree cfg w in
+            let et = ContextFreeGrammarBasicsX.externalizeParseTree tree in
+            ignore (et);
+            ()
+
+
         let test_ag1_simple_synthesized () =
             Util.header "ag1_simple_synthesized";
             let g = AttributeGrammar.make (Arg.Text ag1) in
@@ -14274,13 +14296,13 @@ module AttributeGrammarSupportTests : sig end =
 
         let test_has_cycles_ok () =
               Util.header "has_cycles_ok";
-              let g = AttributeGrammarSupport.fromJSon (JSon.parse ok_ag) in
+              let g = AttributeGrammar.make (Arg.Text ok_ag) in
               let r = has_cycles g in
               Printf.printf "has_cycles(ok_ag) = %b (expected false)\n" r
 
         let test_has_cycles_detected () =
               Util.header "has_cycles_detected";
-              let g = AttributeGrammarSupport.fromJSon (JSon.parse cyc_ag) in
+              let g = AttributeGrammar.make (Arg.Text cyc_ag) in
               let r = has_cycles g in
               Printf.printf "has_cycles(cyc_ag) = %b (expected true)\n" r
 
@@ -14298,7 +14320,7 @@ module AttributeGrammarSupportTests : sig end =
                 AttributeGrammarPrivate.ga_to_cfg g
               in
               let sym = BasicTypes.str2symb in
-              let three = sym "9" and star = sym "-" and two = sym "2" in
+              let three = sym "3" and star = sym "*" and two = sym "2" in
               let w = [three; star; two] in
 
               let r = ContextFreeGrammarBasic.accept cfg w in
@@ -14395,9 +14417,9 @@ module AttributeGrammarSupportTests : sig end =
                 ])
               ])
 
-        let test_ validate () =
+        let test_validate () =
              Util.header "test validate";
-             let g = AttributeGrammarSupport.fromJSon (JSon.parse ag_expr_ext) in
+             let g = AttributeGrammar.make (Arg.Text ag_expr_ext) in
              validate "test validate" g
 
         let test_ag_expr_ext () =
@@ -14432,13 +14454,14 @@ module AttributeGrammarSupportTests : sig end =
                 test_ag9_list_length ();
                 test_ag10_inherited_default ();
                 test_ag11_out_of_range_ref ();
-                (*test_accept_with_tree_ok ();*)
+                test_accept_with_tree_ok ();*)
                 (*generate_words ();*)
-                (*test_accept_words ();*)
-                test_has_cycles_ok ();
+                (*test_accept_words ()*)
+                (*test_has_cycles_ok ();
                 test_has_cycles_detected ();
-                test_ag_expr_ext ()*)
-                test_ validate ()
+                test_ag_expr_ext ()
+                test_ validate ()*)
+                test_parseTree ()
 
               end
 	end

@@ -794,11 +794,12 @@
 		let make (arg: t Arg.alternatives): t = make arg validate
 
 		(* Exercices support *)
-		let checkProperty (fa: t) (prop: string) =
+		let checkProperty (ag: t) (prop: string) =
 			match prop with
+				| "attribute grammar" -> true
 				| _ -> Model.checkProperty prop
-		let checkExercise ex fa = Model.checkExercise ex (accept fa) (checkProperty fa)
-		let checkExerciseFailures ex fa = Model.checkExerciseFailures ex (accept fa) (checkProperty fa)
+		let checkExercise ex ag = Model.checkExercise ex (accept ag) (checkProperty ag)
+		let checkExerciseFailures ex ag = Model.checkExerciseFailures ex (accept ag) (checkProperty ag)
 
 		(* Ops *)
 		let stats = Model.stats
