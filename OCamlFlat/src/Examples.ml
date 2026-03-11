@@ -904,15 +904,57 @@ struct
 			properties : ["finite automaton"]
 		} |}
 
-    let exer_ag30 = {| {
+    let exer_ag_30 = {| {
             kind : "exercise",
-            description : "this is an example",
+            description : "gramatica de a's e b's com tamanho menor a 30",
             name : "exer_ag30",
             problem : "Escreva uma gramática de atributos que descreva a linguagem de todas as sequencias de a's e b's com tamanho inferior a 30",
             inside : ["a", "b", "", "ababababababababababababababa", "abbaab", "bbaabb"],
             outside : ["abababababababababababababababa"],
             properties : ["attribute grammar"]
         } |}
+
+   let exer_ag_no_aa = {| {
+           kind : "exercise",
+           description : "sem o padrão 'aa'",
+           name : "exer_ag_no_aa",
+           problem : "Escreva uma gramática de atributos que descreva a linguagem de todas as sequências de a's e b's que não contêm o padrão 'aa' (isto é, não há dois 'a' consecutivos).",
+           inside : ["", "b", "ab", "ba", "bab", "abab", "abbab", "bbabb"],
+           outside : ["aa", "aab", "baa", "abaa", "aaabab"],
+           properties : ["attribute grammar"]
+       } |}
+
+   let exer_ag_equal_ab = {| {
+           kind : "exercise",
+           description : "mesma quantidade de 'a' e 'b'",
+           name : "exer_ag_equal_ab",
+           problem : "Escreva uma gramática de atributos que descreva a linguagem de todas as sequências de a's e b's com a mesma quantidade de 'a' e de 'b'.",
+           inside : ["", "ab", "ba", "aabb", "abba", "baba", "bbaa"],
+           outside : ["a", "b", "abb", "aab", "aaab", "bbba"],
+           properties : ["attribute grammar"]
+       } |}
+
+   let exer_ag_even_1 = {| {
+           kind : "exercise",
+           description : "número de '1' par",
+           name : "exer_ag_even_1",
+           problem : "Escreva uma gramática de atributos que descreva a linguagem de todas as sequências de 0 e 1 em que o número de '1' é par.",
+           inside : ["", "0", "00", "11", "1010", "1100", "0101", "1111"],
+           outside : ["1", "10", "01", "111", "101", "1101"],
+           properties : ["attribute grammar"]
+        } |}
+
+   let exer_ag_palindrome_01 = {| {
+           kind : "exercise",
+           description : "palíndromos em {0,1}",
+           name : "exer_ag_palindrome_01",
+           problem : "Escreva uma gramática de atributos que descreva a linguagem de todas as sequências de 0 e 1 que são palíndromos.",
+           inside : ["", "0", "1", "00", "11", "010", "101", "0110", "1001", "10101"],
+           outside : ["01", "10", "001", "1100", "0101", "1010"],
+           properties : ["attribute grammar"]
+       } |}
+
+
 
 	let oflatExamplesTable = [
 		("dfa_1", dfa_1);
