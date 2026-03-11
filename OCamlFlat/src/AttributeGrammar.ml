@@ -782,6 +782,15 @@
            validateConditions name rep;
            if has_cycles rep then
            Error.error name "Attribute dependency cycle detected" ()
+
+       let rec cfgTree_to_agTree (t: ContextFreeGrammarBasics.cfgTree) : parseTree =
+         match t with
+         | ContextFreeGrammarBasics.Leaf s ->
+            Leaf (s, (Set.empty : evaluations))
+         | ContextFreeGrammarBasics.Root (s, children) ->
+            let children' = List.map cfgTree_to_agTree children in
+            Node ((s, (Set.empty : evaluations)), children')
+
       end
 
 	module AttributeGrammar =

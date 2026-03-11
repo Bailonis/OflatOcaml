@@ -31,10 +31,9 @@ module AttributeGrammarSupportTests : sig end =
 	struct
 		open AttributeGrammar
         open AttributeGrammarPrivate
-        open BasicTypes
 
 		let active = true
-        let e s = (symb s, Set.empty);;
+        let e s = (BasicTypes.symb s, Set.empty);;
 
         let ag1 = {| {
                 kind : "attribute grammar",
@@ -368,15 +367,14 @@ module AttributeGrammarSupportTests : sig end =
         } |}
 
         let test_parseTree () =
-            Util.header "ag1_simple_synthesized";
-            let g = AttributeGrammar.make (Arg.Text ag1) in
-            let w = word "3*2" in
+            Util.header "Test make parse tree";
+            let g = AttributeGrammar.make (Arg.Text ag2) in
+            let w = BasicTypes.word "3+2+9~" in
             let cfg = ga_to_cfg g in
             let tree = ContextFreeGrammarParseTree.parseTree cfg w in
-            let et = ContextFreeGrammarBasicsX.externalizeParseTree tree in
-            ignore (et);
-            ()
-
+            let t = cfgTree_to_agTree tree in
+            let newTree = calcAttributes g t in
+            print_parse_tree newTree
 
         let test_ag1_simple_synthesized () =
             Util.header "ag1_simple_synthesized";
@@ -606,7 +604,7 @@ module AttributeGrammarSupportTests : sig end =
                 | Node (n, children) -> (n, children)
                 | Leaf n -> (n, [])
               in
-              let find a = snd (Set.find (fun (attr,_) -> attr = symb a) evs) in
+              let find a = snd (Set.find (fun (attr,_) -> attr = BasicTypes.symb a) evs) in
               let vS = find "v" and sS = find "s" and hS = find "h" in
               let show_v = match vS with Int n -> n | _ -> failwith "v(S) not Int" in
               let show_s = match sS with String s -> s | _ -> failwith "s(S) not String" in
