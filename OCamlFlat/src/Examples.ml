@@ -904,6 +904,16 @@ struct
 			properties : ["finite automaton"]
 		} |}
 
+    let exer_ag30 = {| {
+            kind : "exercise",
+            description : "this is an example",
+            name : "exer_ag30",
+            problem : "Escreva uma gramática de atributos que descreva a linguagem de todas as sequencias de a's e b's com tamanho inferior a 30",
+            inside : ["a", "b", "", "ababababababababababababababa", "abbaab", "bbaabb"],
+            outside : ["abababababababababababababababa"],
+            properties : ["attribute grammar"]
+        } |}
+
 	let oflatExamplesTable = [
 		("dfa_1", dfa_1);
 		("dfa_2", dfa_2);
