@@ -45,12 +45,6 @@ struct
 	type condition = expression 
 	type conditions = condition set
 
-
-	(*
- * condition: tem que ser booleano
- * equation do lado esquerdo é um apply
- *)
-
 	type rule = {
 		head : variable;
 		body : word;

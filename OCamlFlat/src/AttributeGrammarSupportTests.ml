@@ -369,7 +369,7 @@ module AttributeGrammarSupportTests : sig end =
         let test_parseTree () =
             Util.header "Test make parse tree";
             let g = AttributeGrammar.make (Arg.Text ag2) in
-            let w = BasicTypes.word "3+2+9~" in
+            let w = BasicTypes.word "3+2+9+5+5+5+5+5+5+5+5+5+5+5+5+5+5" in
             let cfg = ga_to_cfg g in
             let tree = ContextFreeGrammarParseTree.parseTree cfg w in
             let t = cfgTree_to_agTree tree in

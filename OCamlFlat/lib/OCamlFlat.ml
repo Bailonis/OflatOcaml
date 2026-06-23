@@ -12673,12 +12673,6 @@ struct
 	type condition = expression 
 	type conditions = condition set
 
-
-	(*
- * condition: tem que ser booleano
- * equation do lado esquerdo é um apply
- *)
-
 	type rule = {
 		head : variable;
 		body : word;
@@ -13582,9 +13576,9 @@ end
           let occs = child_occurrences children in
 
           let rec loop
-              (processed   : parseTree list)        (* already evaluated children, in reverse order *)
-              (remaining   : parseTree list)        (* children yet to process, in order *)
-              (remaining_o : (symbol * int) list)   (* their (sym,occ) *)
+              (processed   : parseTree list)
+              (remaining   : parseTree list)
+              (remaining_o : (symbol * int) list)
             : parseTree list =
             match remaining, remaining_o with
             | [], [] ->
@@ -14245,7 +14239,7 @@ module AttributeGrammarSupportTests : sig end =
         let test_parseTree () =
             Util.header "Test make parse tree";
             let g = AttributeGrammar.make (Arg.Text ag2) in
-            let w = BasicTypes.word "3+2+9~" in
+            let w = BasicTypes.word "3+2+9+5+5+5+5+5+5+5+5+5+5+5+5+5+5+5+55+5+5+5+5+5" in
             let cfg = ga_to_cfg g in
             let tree = ContextFreeGrammarParseTree.parseTree cfg w in
             let t = cfgTree_to_agTree tree in

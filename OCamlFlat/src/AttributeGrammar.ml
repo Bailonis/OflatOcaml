@@ -527,9 +527,9 @@
           let occs = child_occurrences children in
 
           let rec loop
-              (processed   : parseTree list)        (* already evaluated children, in reverse order *)
-              (remaining   : parseTree list)        (* children yet to process, in order *)
-              (remaining_o : (symbol * int) list)   (* their (sym,occ) *)
+              (processed   : parseTree list)
+              (remaining   : parseTree list)
+              (remaining_o : (symbol * int) list)
             : parseTree list =
             match remaining, remaining_o with
             | [], [] ->
